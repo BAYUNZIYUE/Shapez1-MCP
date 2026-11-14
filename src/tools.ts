@@ -27,12 +27,15 @@ const failure = (prefix: string, error: unknown): ToolResult => {
   return { content: [{ type: "text", text: `${prefix}失败：${describeError(error)}` }], isError: true };
 };
 
+// 注意：游戏内部的 StaticMapEntity.rotation 是**角度**，且断言必须是 90 的倍数，
+// 不是 0..3 的索引（传 1 会报 "Rotation of static map entity must be multiple of 90"）。
 const rotationSchema = z
   .number()
   .int()
   .min(0)
-  .max(3)
-  .describe("旋转，0=上 1=右 2=下 3=左（顺时针）");
+  .max(270)
+  .multipleOf(90)
+  .describe("朝向角度：0=上 90=右 180=下 270=左（顺时针，必须是 90 的倍数）");
 
 const placementSchema = z.object({
   buildingId: z
@@ -160,6 +163,45 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
           return ok(await call("queryEntities", args, 60_000));
         } catch (error) {
           return failure("查询实体", error);
+        }
+      },
+    },
+    {
+      name: "shapez_query_resources",
+      description:
+        "扫描地图底层的资源（矿）分布：返回每格资源的形状短码与各形状格数。放 miner 之前先查这个，miner 只能放在有资源的格子上。默认扫相机周围 32 格半径，单次最多 65536 格。",
+      inputSchema: z.object({
+        x: z.number().int().optional().describe("扫描中心 x（默认相机中心）"),
+        y: z.number().int().optional().describe("扫描中心 y（默认相机中心）"),
+        radius: z.number().int().min(1).max(128).optional().describe("正方形半径，默认 32"),
+        x1: z.number().int().optional(),
+        y1: z.number().int().optional(),
+        x2: z.number().int().optional(),
+        y2: z.number().int().optional(),
+        limit: z.number().int().min(1).max(5000).default(2000).describe("最多列出多少格，默认 2000"),
+      }),
+      handler: async (args) => {
+        try {
+          return ok(await call("queryResources", args, 60_000));
+        } catch (error) {
+          return failure("扫描资源", error);
+        }
+      },
+    },
+    {
+      name: "shapez_inspect_tile",
+      description:
+        "看单个格子：上面的建筑（id/位置/方向）、底层资源，以及如果是传送带时带上的物品（形状与距离）。用于验证自动放置后物料是否真的在流动。",
+      inputSchema: z.object({
+        x: z.number().int(),
+        y: z.number().int(),
+        layer: layerSchema.optional(),
+      }),
+      handler: async (args) => {
+        try {
+          return ok(await call("inspectTile", args));
+        } catch (error) {
+          return failure("查看格子", error);
         }
       },
     },

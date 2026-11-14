@@ -61,6 +61,47 @@ function resolveUrl() {
   return url;
 }
 
+/** 把物品（BaseItem）转成形状短码；不同来源的物品暴露面不完全一样，逐级兜底。 */
+function itemKey(item) {
+  if (!item) {
+    return null;
+  }
+  try {
+    if (typeof item.getHash === "function") {
+      var hash = item.getHash();
+      if (hash !== undefined && hash !== null) {
+        return String(hash);
+      }
+    }
+  } catch (error) {
+    /* 继续兜底 */
+  }
+  try {
+    if (item.definition && typeof item.definition.getHash === "function") {
+      return String(item.definition.getHash());
+    }
+  } catch (error) {
+    /* 继续兜底 */
+  }
+  try {
+    if (item.key !== undefined && item.key !== null) {
+      return String(item.key);
+    }
+  } catch (error) {
+    /* 放弃 */
+  }
+  return null;
+}
+
+/** 仅用于诊断：拿不到短码时把类型名报出来，方便定位游戏内部结构。 */
+function itemType(item) {
+  try {
+    return (item && item.constructor && item.constructor.name) || typeof item;
+  } catch (error) {
+    return "unknown";
+  }
+}
+
 function errorPayload(error) {
   return {
     code: (error && error.code) || "mod_error",
@@ -393,6 +434,90 @@ class Mod extends shapez.Mod {
     return { valid: true, key: key, hash: definition.getHash(), layers: layers };
   }
 
+  queryResources(params) {
+    var root = this.requireRoot();
+    var center = root.camera && root.camera.center ? root.camera.center : { x: 0, y: 0 };
+    var cx = params.x === undefined ? Math.round(center.x) : params.x;
+    var cy = params.y === undefined ? Math.round(center.y) : params.y;
+    var half = params.radius === undefined ? 32 : Math.max(1, Math.min(128, params.radius));
+    var x1 = params.x1 === undefined ? cx - half : params.x1;
+    var y1 = params.y1 === undefined ? cy - half : params.y1;
+    var x2 = params.x2 === undefined ? cx + half : params.x2;
+    var y2 = params.y2 === undefined ? cy + half : params.y2;
+    if ((x2 - x1 + 1) * (y2 - y1 + 1) > 65536) {
+      throw new Error("扫描范围超过 65536 格，请缩小范围（用 radius 或 x1..y2）");
+    }
+
+    var tiles = [];
+    var counts = {};
+    var limit = params.limit === undefined ? 2000 : params.limit;
+    for (var x = x1; x <= x2; x++) {
+      for (var y = y1; y <= y2; y++) {
+        var item = null;
+        try {
+          item = root.map.getLowerLayerContentXY(x, y);
+        } catch (error) {
+          item = null;
+        }
+        if (!item) {
+          continue;
+        }
+        var key = itemKey(item);
+        counts[key] = (counts[key] || 0) + 1;
+        if (tiles.length < limit) {
+          tiles.push({ x: x, y: y, shape: key, type: key === null ? itemType(item) : undefined });
+        }
+      }
+    }
+    return {
+      bounds: { x1: x1, y1: y1, x2: x2, y2: y2 },
+      scanned: (x2 - x1 + 1) * (y2 - y1 + 1),
+      truncated: Object.keys(counts).length > 0 && tiles.length >= limit,
+      counts: counts,
+      tiles: tiles,
+    };
+  }
+
+  inspectTile(params) {
+    var root = this.requireRoot();
+    var layer = params.layer || root.currentLayer;
+    var result = { x: params.x, y: params.y, layer: layer, building: null, resource: null, belt: null };
+    try {
+      var resource = root.map.getLowerLayerContentXY(params.x, params.y);
+      result.resource = itemKey(resource);
+      if (result.resource === null && resource) {
+        result.resourceType = itemType(resource);
+      }
+    } catch (error) {
+      result.resource = null;
+    }
+    var entity = root.map.getLayerContentXY(params.x, params.y, layer);
+    if (!entity) {
+      return result;
+    }
+    result.building = this.describeEntity(entity);
+    try {
+      var beltComp = entity.components && entity.components.Belt;
+      if (beltComp && beltComp.assignedPath) {
+        var slots = [];
+        var raw = beltComp.assignedPath.items || [];
+        for (var i = 0; i < raw.length && i < 50; i++) {
+          var entry = raw[i];
+          var item = entry[1];
+          slots.push({
+            distance: entry[0],
+            shape: itemKey(item),
+            type: itemKey(item) === null ? itemType(item) : undefined,
+          });
+        }
+        result.belt = { items: slots, spacingToFirstItem: beltComp.assignedPath.spacingToFirstItem };
+      }
+    } catch (error) {
+      result.beltError = errorPayload(error).message;
+    }
+    return result;
+  }
+
   listBuildings() {
     var variants = shapez.gBuildingVariants || {};
     var result = [];
@@ -434,6 +559,9 @@ class Mod extends shapez.Mod {
     }
 
     var rotation = params.rotation || 0;
+    if (rotation % 90 !== 0) {
+      throw new Error("rotation 必须是 90 的倍数（0=上 90=右 180=下 270=左），收到 " + rotation);
+    }
     var entity = root.logic.tryPlaceBuilding({
       origin: new shapez.Vector(params.x, params.y),
       building: building,
@@ -608,6 +736,8 @@ class Mod extends shapez.Mod {
   methods = {
     status: this.status,
     listBuildings: this.listBuildings,
+    queryResources: this.queryResources,
+    inspectTile: this.inspectTile,
     queryEntities: this.queryEntities,
     hubGoals: this.hubGoals,
     productionRates: this.productionRates,

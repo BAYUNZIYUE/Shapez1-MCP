@@ -45,6 +45,7 @@ mod/ 与 src/ 无编译期依赖，共享的只有协议字段名
 5. **游戏内取值一律防御式**：`try/catch` + 缺字段返回 `null`，错误消息里带上原因；不要假设私有字段稳定。
 6. **建筑用 meta id + variant，不是 `belt_forward` 这种拼串**：`belt` 的三种方向是 `rotationVariant` 0/1/2，`code`（`gBuildingVariants` 的 key）是最稳的寻址方式。
 7. **层是字符串 `regular` / `wires`**，不是数字（`root.js` 的 `layers`）。
+7b. **`rotation` 是角度，不是 0..3 索引**：`StaticMapEntity` 断言必须是 90 的倍数（0/90/180/270）。schema 层已用 `.multipleOf(90)` 卡住，mod 里还会再判一次。
 8. `productionAnalytics` 的接口是 `getCurrentShapeRatesRaw(dataSource)`，`dataSource` ∈ `produced` / `stored` / `delivered`。
 9. **不要 hook 或替换游戏方法**（`replaceMethod` / `extendClass`）：本 mod 靠订阅信号 + 调公开 API 工作，这是它和其他 mod 能共存的原因。确实要加 hook 时，先确认不会和"多人同步类 mod"抢同一方法。
 10. 其他 mod 注册的建筑走同一条 `registerBuildingVariants → gBuildingVariants` 链路，所以 `list_buildings` 自动包含它们（`code` 可能是 `buildingId` 字符串），无需特判。
@@ -66,6 +67,9 @@ SHAPEZ1_MCP_HOST=0.0.0.0 SHAPEZ1_MCP_TOKEN=<与 mod 一致> node scripts/live-ch
 ```
 
 11 项检查：连接 / 存档 / list_buildings / belt code / place / query / delete / query 空 / hub_goals / production_rates / decode_shape。退出码 0 = 全过。
+
+**自动游玩**：`node scripts/auto-play.mjs --max-level 2 --cleanup`（只用 MCP 工具：找矿 → BFS 找空格路径 → 批量铺传送带 → 放 miner → 等交付）。
+已实测能把第 1 关自动打通（交付 10 个 `CuCuCuCu` 升到第 2 关）。第 2 关起需要切割机产线，脚本还没做（见 README「仍未验证」2b）。
 
 改动 mod 后要**重载游戏页面**（dev 构建）或重启游戏（桌面版）才生效，因为 mod 只在启动时取一次。
 

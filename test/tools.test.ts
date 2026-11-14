@@ -39,10 +39,12 @@ function parse(result: { content: { text: string }[] }): unknown {
 }
 
 describe("MCP 工具层", () => {
-  it("注册 11 个工具且名称唯一", () => {
+  it("注册 13 个工具且名称唯一", () => {
     const names = buildTools({ game: fakeGame() }).map((item) => item.name);
-    expect(names).toHaveLength(11);
-    expect(new Set(names).size).toBe(11);
+    expect(names).toHaveLength(13);
+    expect(new Set(names).size).toBe(13);
+    expect(names).toContain("shapez_query_resources");
+    expect(names).toContain("shapez_inspect_tile");
     expect(names).toContain("shapez_place_buildings");
     expect(names).toContain("shapez_list_buildings");
   });
@@ -64,6 +66,8 @@ describe("MCP 工具层", () => {
   it("输入校验：非法旋转与越界 limit 被 schema 拒绝", () => {
     const schema = tool("shapez_place_building", fakeGame()).inputSchema;
     expect(schema.safeParse({ buildingId: "belt", x: 0, y: 0, rotation: 5 }).success).toBe(false);
+    expect(schema.safeParse({ buildingId: "belt", x: 0, y: 0, rotation: 45 }).success).toBe(false);
+    expect(schema.safeParse({ buildingId: "belt", x: 0, y: 0, rotation: 90 }).success).toBe(true);
     expect(schema.safeParse({ buildingId: "", x: 0, y: 0 }).success).toBe(false);
     expect(schema.safeParse({ buildingId: "belt", x: 0.5, y: 0 }).success).toBe(false);
     expect(schema.safeParse({ buildingId: "belt", x: 0, y: 0 }).success).toBe(true);

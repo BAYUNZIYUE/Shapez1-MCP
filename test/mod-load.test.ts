@@ -83,6 +83,8 @@ describe("游戏内 mod（假环境求值）", () => {
     expect(Object.keys(mod.methods)).toEqual([
       "status",
       "listBuildings",
+      "queryResources",
+      "inspectTile",
       "queryEntities",
       "hubGoals",
       "productionRates",

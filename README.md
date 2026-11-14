@@ -76,7 +76,7 @@ SHAPEZ1_MCP_BRIDGE_ONLY=1        # 只跑 WS 桥、不开 stdio（配合别的 M
 |---|---|
 | `shapez_status` | 连接状态、是否已加载存档、速度/暂停、当前层（`regular`/`wires`）、相机、实体总数 |
 | `shapez_list_buildings` | **放置前先调**：列出 59 个建筑变体的 `code`、`buildingId`、`variant`、`rotationVariant`、占地 |
-| `shapez_place_building` | 放一个建筑：`code`（推荐）或 `buildingId`+`variant`，加 `x`/`y`/`rotation` |
+| `shapez_place_building` | 放一个建筑：`code`（推荐）或 `buildingId`+`variant`，加 `x`/`y`/`rotation`（**角度**：0/90/180/270） |
 | `shapez_place_buildings` | 批量放置（游戏内 `performBulkOperation` 包裹，≤5000 条，单条失败不影响其余） |
 | `shapez_delete_building` | 删掉某瓦片上的建筑（可指定层） |
 | `shapez_query_entities` | 按矩形范围/层/建筑 id 查实体，带 `limit` 与 `truncated` |
@@ -91,6 +91,7 @@ SHAPEZ1_MCP_BRIDGE_ONLY=1        # 只跑 WS 桥、不开 stdio（配合别的 M
 - 建筑用的是 **meta id**（`belt`、`miner`、`balancer`、`cutter` …），**没有 `belt_forward` 这种 id**；方向由 `rotationVariant`（传送带 0=直行 1=左转 2=右转）与 `rotation` 决定。
 - 最稳的用法是给 `code`（来自 `gBuildingVariants`，如 1/2/3 = 三种传送带），工具会自动带上正确的 variant 与 rotationVariant。
 - 层是字符串 `regular` / `wires`，不是数字。
+- `rotation` 是**角度**且必须是 90 的倍数（0=上 90=右 180=下 270=左）。传 0..3 的索引会被游戏断言拒绝：`Rotation of static map entity must be multiple of 90`。
 
 ## 和其他 mod 的关系（兼容性）
 
@@ -144,6 +145,12 @@ npm run validate          # typecheck + test（收尾必跑）
 npm run build             # 编译到 dist/
 ```
 
+自动玩（脚本只用 MCP 工具，找矿 → 铺传送带 → 送 Hub → 等升级）：
+
+```bash
+SHAPEZ1_MCP_TOKEN=... node scripts/auto-play.mjs --max-level 2 --cleanup
+```
+
 真实游戏联调（需要先在游戏里进入存档、桥已启动）：
 
 ```bash
@@ -174,11 +181,13 @@ SHAPEZ1_MCP_TOKEN=... node scripts/live-check.mjs
 - `hub_goals`：等级 1、目标形状 `CuCuCuCu`、需求 10、升级等级与加成。
 - `decode_shape`：`CuCuCuCu` → 4 个 `circle`/`uncolored` 象限。
 - `production_rates`：三个数据源都返回对象（新存档为空，不报错）。
+- **自动通关第 1 关**：`scripts/auto-play.mjs` 自己找到 22 格 `CuCuCuCu` 矿、放 miner、铺 7 格传送带到 Hub，交付 10 个后升到第 2 关（目标 `----CuCu` ×20）。
 
 ## 仍未验证
 
 1. `wires` 层上的放置/查询/删除（电线、逻辑门）。
 2. 放置是否进入撤销栈；`place_buildings` 大批量（上千条）的表现。
+2b. 第 2 关起需要切割机（`cutter`）+ 废料（`trash`）的产线，`auto-play.mjs` 目前只会“矿直连 Hub”，不会切形状。
 3. `wait_ticks` 的换算是否接近真实 tick 速率（当前按 60 tick/s × 速度倍率估算）。
 4. `set_speed` 后存档再读回的行为（预期回正常速度）。
 5. `production_rates` 有真实产出时的数值语义（现在只有空对象；切片时长见游戏 `analyticsSliceDurationSeconds`）。
