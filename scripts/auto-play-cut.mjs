@@ -331,19 +331,47 @@ console.log(
 
 // 废料：出料口正上方放垃圾桶；被占用就往边上挪一格
 if (wasteLane) {
-  const wasteSpot = { x: wasteLane.x, y: wasteLane.y - 1 };
-  const existing = (await tool("shapez_inspect_tile", { x: wasteSpot.x, y: wasteSpot.y })).value;
-  if (existing?.building) {
-    console.log(`废料格 ${wasteSpot.x},${wasteSpot.y} 已被 ${existing.building.buildingId} 占用，跳过垃圾桶`);
-  } else {
-    console.log("垃圾桶:", JSON.stringify(await place({ buildingId: "trash", x: wasteSpot.x, y: wasteSpot.y })));
+  // 废料出口必须真正接上桶，否则切割机第二个出料口堵死、整条线停摆。
+  // 先试正上方（直行出料口的默认落点），再试左右/下方，用弯带接过去。
+  let placedTrash = null;
+  for (const dir of DIRS) {
+    const target = { x: wasteLane.x + dir.dx, y: wasteLane.y + dir.dy };
+    if (hubTiles.has(key(target.x, target.y))) continue;
+    const probeTile = (await tool("shapez_inspect_tile", { x: target.x, y: target.y })).value;
+    if (probeTile?.building) continue;
+    const feed = await tool("shapez_build_belt_path", {
+      cells: [{ x: wasteLane.x, y: wasteLane.y }],
+      from: { x: wasteLane.x, y: wasteLane.y + 1 },
+      target,
+    });
+    if (feed.value?.placed !== 1) continue;
+    const trash = await place({ buildingId: "trash", x: target.x, y: target.y });
+    if (trash?.ok === true) {
+      placedTrash = { at: target, dir: dir.name };
+      break;
+    }
+    await tool("shapez_delete_building", { x: wasteLane.x, y: wasteLane.y });
   }
-} else {
-  console.log("没有可识别的废料出料口，跳过垃圾桶");
+  if (placedTrash) {
+    console.log(`废料接桶: ${JSON.stringify(placedTrash)}`);
+  } else {
+    console.log("废料出口四个方向都放不下垃圾桶 —— 这条线会堵，删掉它");
+    for (const dir of DIRS) {
+      await tool("shapez_delete_building", { x: wasteLane.x + dir.dx, y: wasteLane.y + dir.dy });
+    }
+    await tool("shapez_delete_building", { x: wasteLane.x, y: wasteLane.y });
+    for (const cell of path) {
+      await tool("shapez_delete_building", { x: cell.x, y: cell.y });
+    }
+    child.kill("SIGTERM");
+    process.exit(1);
+  }
 }
 
 const startLevel = goals?.level ?? 1;
-const waitRounds = Math.max(18, Math.ceil((goals?.required ?? 30) / 4));
+const waitRounds = Number(
+  process.env.SHAPEZ_WAIT_ROUNDS ?? Math.max(18, Math.ceil((goals?.required ?? 30) / 4)),
+);
 for (let attempt = 0; attempt < waitRounds; attempt++) {
   await dismiss();
   await tool("shapez_wait_ticks", { ticks: 600 });

@@ -256,7 +256,8 @@ for (let round = 0; round < 8 && (goals.value?.level ?? 1) < maxLevel; round++) 
 
   await tool("shapez_set_speed", { mode: "regular" });
   const startLevel = goals.value?.level ?? 1;
-  for (let attempt = 0; attempt < 15; attempt++) {
+  const waitRounds = Number(process.env.SHAPEZ_WAIT_ROUNDS ?? 15);
+  for (let attempt = 0; attempt < waitRounds; attempt++) {
     await tool("shapez_wait_ticks", { ticks: 300 });
     goals = await tool("shapez_hub_goals");
     const delivered = goals.value?.delivered ?? 0;
