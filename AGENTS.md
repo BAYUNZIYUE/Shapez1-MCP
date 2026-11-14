@@ -46,6 +46,7 @@ mod/ 与 src/ 无编译期依赖，共享的只有协议字段名
 6. **建筑用 meta id + variant，不是 `belt_forward` 这种拼串**：`belt` 的三种方向是 `rotationVariant` 0/1/2，`code`（`gBuildingVariants` 的 key）是最稳的寻址方式。
 7. **层是字符串 `regular` / `wires`**，不是数字（`root.js` 的 `layers`）。
 7b. **`rotation` 是角度，不是 0..3 索引**：`StaticMapEntity` 断言必须是 90 的倍数（0/90/180/270）。schema 层已用 `.multipleOf(90)` 卡住，mod 里还会再判一次。
+7c. **拐角必须用弯带**：传送带变体 0=直行、1/2=转弯；`rotationVariant` 是变体索引，`rotation` 是角度。直带 + 直带在拐角不相连。铺带统一走 `shapez_build_belt_path`（mod 里按 `din`/`dout` 选变体：弯带实体 rotation = 进入方向，variant 2 出口 = 进入方向 +90°，variant 1 = -90°），不要手拼单格。
 8. `productionAnalytics` 的接口是 `getCurrentShapeRatesRaw(dataSource)`，`dataSource` ∈ `produced` / `stored` / `delivered`。
 9. **不要 hook 或替换游戏方法**（`replaceMethod` / `extendClass`）：本 mod 靠订阅信号 + 调公开 API 工作，这是它和其他 mod 能共存的原因。确实要加 hook 时，先确认不会和"多人同步类 mod"抢同一方法。
 10. 其他 mod 注册的建筑走同一条 `registerBuildingVariants → gBuildingVariants` 链路，所以 `list_buildings` 自动包含它们（`code` 可能是 `buildingId` 字符串），无需特判。
@@ -69,7 +70,7 @@ SHAPEZ1_MCP_HOST=0.0.0.0 SHAPEZ1_MCP_TOKEN=<与 mod 一致> node scripts/live-ch
 11 项检查：连接 / 存档 / list_buildings / belt code / place / query / delete / query 空 / hub_goals / production_rates / decode_shape。退出码 0 = 全过。
 
 **自动游玩**：`node scripts/auto-play.mjs --max-level 2 --cleanup`（只用 MCP 工具：找矿 → BFS 找空格路径 → 批量铺传送带 → 放 miner → 等交付）。
-已实测能把第 1 关自动打通（交付 10 个 `CuCuCuCu` 升到第 2 关）。第 2 关起需要切割机产线，脚本还没做（见 README「仍未验证」2b）。
+已实测自动通关 1–3 关：`auto-play.mjs` 打纯矿→Hub 的关卡；需要切割的关卡用 `scripts/build-cutter-line.mjs`（miner → cutter → 探针读两条输出带 → 目标进 Hub、废料进 trash）。第 4 关起还没做。
 
 改动 mod 后要**重载游戏页面**（dev 构建）或重启游戏（桌面版）才生效，因为 mod 只在启动时取一次。
 
@@ -89,5 +90,6 @@ SHAPEZ1_MCP_HOST=0.0.0.0 SHAPEZ1_MCP_TOKEN=<与 mod 一致> node scripts/live-ch
 - `waitTicks` 是按 60 tick/s × 速度倍率换算的**近似**等待，不是真实 tick 计数；暂停时直接返回。
 - 一个桥同时只服务一个游戏连接，新连接会顶掉旧连接（有意为之，方便重载存档）。
 - 未覆盖：`wires` 层、撤销栈、大批量放置、`set_speed` 存档重载行为、桌面版（Electron）加载路径。见 README「仍未验证」。
+- 关卡弹窗（“第 N 关完成 / 下一关”）会**暂停模拟**：这时所有 miner/传送带都不动，`shapez_status` 仍显示 `paused:false`。自动玩之前必须先把弹窗点掉（人或 browse 驱动）。
 - 与其他 mod 共存已验证（官方示例 base + add_building_basic：60 个变体、新建筑能放能删），但**替换了 `tryPlaceBuilding` 的 mod（多人同步类）未验证**——本 mod 直接调底层 API 会绕过对方。
 - 不支持 shapez Community Edition 的 `.asar` + `mod.json` mod 格式。

@@ -218,22 +218,16 @@ for (let round = 0; round < 8 && (goals.value?.level ?? 1) < maxLevel; round++) 
     const path = pathToHub(front, blocked);
     if (!path) continue;
 
-    const belts = path.map((cell, index) => {
-      if (index + 1 < path.length) {
-        const next = path[index + 1];
-        const dir = DIRS.find((d) => cell.x + d.dx === next.x && cell.y + d.dy === next.y);
-        return { code: BELT_CODE, x: cell.x, y: cell.y, rotation: dir ? dir.rotation : 0 };
-      }
-      const intoHub = DIRS.find((d) => hubTiles.has(key(cell.x + d.dx, cell.y + d.dy)));
-      return { code: BELT_CODE, x: cell.x, y: cell.y, rotation: intoHub ? intoHub.rotation : 0 };
+    const last = path[path.length - 1];
+    const hubTarget = DIRS.find((dir) => hubTiles.has(key(last.x + dir.dx, last.y + dir.dy)));
+    const beltResult = await tool("shapez_build_belt_path", {
+      cells: path,
+      from: { x: candidate.x, y: candidate.y },
+      ...(hubTarget ? { target: { x: last.x + hubTarget.dx, y: last.y + hubTarget.dy } } : {}),
     });
-
-    const placedBelts = await tool("shapez_place_buildings", { buildings: belts });
-    const placedCount = placedBelts.value?.placed ?? 0;
-    if (placedCount !== belts.length) {
-      console.log(
-        `传送带 ${placedCount}/${belts.length}，失败样例：${JSON.stringify((placedBelts.value?.failed ?? []).slice(0, 2))}`,
-      );
+    const placedCount = beltResult.value?.placed ?? 0;
+    if (!beltResult.value || placedCount !== path.length) {
+      console.log(`传送带 ${placedCount}/${path.length}：${beltResult.text.slice(0, 160)}`);
       continue;
     }
 
@@ -245,13 +239,13 @@ for (let round = 0; round < 8 && (goals.value?.level ?? 1) < maxLevel; round++) 
     });
     if (miner.value?.ok !== true) {
       console.log(`miner 失败 @${candidate.x},${candidate.y}：${miner.value?.reason ?? miner.text}`);
-      for (const belt of belts) {
-        await tool("shapez_delete_building", { x: belt.x, y: belt.y });
+      for (const cell of path) {
+        await tool("shapez_delete_building", { x: cell.x, y: cell.y });
       }
       continue;
     }
-    console.log(`miner @${candidate.x},${candidate.y} 朝${toward.name}，传送带 ${belts.length} 格`);
-    built = { candidate, belts };
+    console.log(`miner @${candidate.x},${candidate.y} 朝${toward.name}，传送带 ${path.length} 格`);
+    built = { candidate, path };
     break;
   }
 
@@ -261,12 +255,13 @@ for (let round = 0; round < 8 && (goals.value?.level ?? 1) < maxLevel; round++) 
   }
 
   await tool("shapez_set_speed", { mode: "regular" });
+  const startLevel = goals.value?.level ?? 1;
   for (let attempt = 0; attempt < 15; attempt++) {
     await tool("shapez_wait_ticks", { ticks: 300 });
     goals = await tool("shapez_hub_goals");
     const delivered = goals.value?.delivered ?? 0;
     console.log(`  交付 ${delivered}/${required}，关卡 ${goals.value?.level}`);
-    if ((goals.value?.level ?? 1) > 1) break;
+    if ((goals.value?.level ?? startLevel) > startLevel) break;
   }
 }
 

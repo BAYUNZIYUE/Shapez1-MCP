@@ -206,6 +206,34 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
       },
     },
     {
+      name: "shapez_build_belt_path",
+      description:
+        "沿一串格子铺传送带，自动选直行/左转/右转变体（转弯必须用弯带，两条直带在拐角是不通的）。cells 按行进顺序给；target 是最后一格要朝向的目标（例如 Hub 内的一格），可不填。",
+      inputSchema: z.object({
+        cells: z
+          .array(z.object({ x: z.number().int(), y: z.number().int() }))
+          .min(1)
+          .max(500)
+          .describe("传送带经过的格子，按行进顺序"),
+        target: z
+          .object({ x: z.number().int(), y: z.number().int() })
+          .optional()
+          .describe("最后一格朝向的目标格（不铺带），通常是 Hub 内的一格"),
+        from: z
+          .object({ x: z.number().int(), y: z.number().int() })
+          .optional()
+          .describe("第一格的来源格（不铺带），例如矿机/切割机所在格；用来决定首格是直行还是转弯"),
+        layer: layerSchema.optional(),
+      }),
+      handler: async (args) => {
+        try {
+          return ok(await call("buildBeltPath", args, 120_000));
+        } catch (error) {
+          return failure("铺设传送带", error);
+        }
+      },
+    },
+    {
       name: "shapez_hub_goals",
       description: "读取 Hub 升级目标：当前目标进度、已交付数量、各级升级等级、Hub 内已存形状。",
       inputSchema: z.object({}),

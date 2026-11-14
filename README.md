@@ -78,6 +78,7 @@ SHAPEZ1_MCP_BRIDGE_ONLY=1        # 只跑 WS 桥、不开 stdio（配合别的 M
 | `shapez_list_buildings` | **放置前先调**：列出 59 个建筑变体的 `code`、`buildingId`、`variant`、`rotationVariant`、占地 |
 | `shapez_place_building` | 放一个建筑：`code`（推荐）或 `buildingId`+`variant`，加 `x`/`y`/`rotation`（**角度**：0/90/180/270） |
 | `shapez_place_buildings` | 批量放置（游戏内 `performBulkOperation` 包裹，≤5000 条，单条失败不影响其余） |
+| `shapez_build_belt_path` | 沿格子序列铺传送带，**自动选直行/左转/右转变体**（拐角必须用弯带，两条直带是不通的） |
 | `shapez_delete_building` | 删掉某瓦片上的建筑（可指定层） |
 | `shapez_query_entities` | 按矩形范围/层/建筑 id 查实体，带 `limit` 与 `truncated` |
 | `shapez_hub_goals` | 等级、当前目标（形状/需求/已交付）、Hub 已存形状、各升级等级与加成 |
@@ -92,6 +93,7 @@ SHAPEZ1_MCP_BRIDGE_ONLY=1        # 只跑 WS 桥、不开 stdio（配合别的 M
 - 最稳的用法是给 `code`（来自 `gBuildingVariants`，如 1/2/3 = 三种传送带），工具会自动带上正确的 variant 与 rotationVariant。
 - 层是字符串 `regular` / `wires`，不是数字。
 - `rotation` 是**角度**且必须是 90 的倍数（0=上 90=右 180=下 270=左）。传 0..3 的索引会被游戏断言拒绝：`Rotation of static map entity must be multiple of 90`。
+- 拐角必须用**弯带**：传送带 `code` 1=直行、2/3=左右转（`rotationVariant`），两条直带在拐角是不通的。`shapez_build_belt_path` 会按进入/离开方向自动选，手工铺带时别硬拼直带。
 
 ## 和其他 mod 的关系（兼容性）
 
@@ -181,7 +183,11 @@ SHAPEZ1_MCP_TOKEN=... node scripts/live-check.mjs
 - `hub_goals`：等级 1、目标形状 `CuCuCuCu`、需求 10、升级等级与加成。
 - `decode_shape`：`CuCuCuCu` → 4 个 `circle`/`uncolored` 象限。
 - `production_rates`：三个数据源都返回对象（新存档为空，不报错）。
-- **自动通关第 1 关**：`scripts/auto-play.mjs` 自己找到 22 格 `CuCuCuCu` 矿、放 miner、铺 7 格传送带到 Hub，交付 10 个后升到第 2 关（目标 `----CuCu` ×20）。
+- **自动通关 1–3 关**（全程只有 MCP 工具调用）：
+  1. 第 1 关 `CuCuCuCu` ×10：找 22 格矿、BFS 选路、铺带、放 miner → 交付 10 个升级。
+  2. 第 2 关 `----CuCu` ×20：miner → 切割机（2x1，南进北出两条）→ 探针读两条带上的形状（`----CuCu`/`CuCu----`）→ 目标那路进 Hub、废料那路进 trash → 交付 20 个升级。
+  3. 第 3 关 `RuRuRuRu` ×30：换矿、重新选路 → 交付 30 个升级。
+- 目前停在第 4 关（`RuRu----` ×30，需要「切割 Ru 矿」的产线）。
 
 ## 仍未验证
 

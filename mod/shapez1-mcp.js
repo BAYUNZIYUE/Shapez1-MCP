@@ -102,6 +102,17 @@ function itemType(item) {
   }
 }
 
+/** 瓦片坐标 → 朝向角度（0=上 90=右 180=下 270=左，与游戏一致）。 */
+function angleBetween(from, to) {
+  var dx = to.x - from.x;
+  var dy = to.y - from.y;
+  if (dx === 0 && dy < 0) return 0;
+  if (dx > 0 && dy === 0) return 90;
+  if (dx === 0 && dy > 0) return 180;
+  if (dx < 0 && dy === 0) return 270;
+  return null;
+}
+
 function errorPayload(error) {
   return {
     code: (error && error.code) || "mod_error",
@@ -518,6 +529,65 @@ class Mod extends shapez.Mod {
     return result;
   }
 
+  /**
+   * 沿给定的格子序列铺一条传送带，自动挑直行/左转/右转变体。
+   * 游戏里旋转是角度（0/90/180/270），弯带用 rotationVariant 1/2 表示：
+   *   弯带：实体 rotation = 进入方向，variant 2 出口 = 进入方向 + 90°，variant 1 出口 = 进入方向 - 90°。
+   */
+  buildBeltPath(params) {
+    var root = this.requireRoot();
+    var cells = params.cells;
+    if (!Array.isArray(cells) || cells.length === 0) {
+      throw new Error("cells 必须是非空格子数组");
+    }
+    var meta = shapez.gMetaBuildingRegistry.findById("belt");
+    var layer = params.layer || root.currentLayer;
+    var target = params.target || null;
+    var from = params.from || null;
+    var placed = 0;
+    var failed = [];
+
+    root.logic.performBulkOperation(() => {
+      for (var i = 0; i < cells.length; i++) {
+        var cell = cells[i];
+        var prev = i > 0 ? cells[i - 1] : null;
+        var next = i + 1 < cells.length ? cells[i + 1] : target;
+        var din = prev ? angleBetween(prev, cell) : i === 0 && from ? angleBetween(from, cell) : null;
+        var dout = next ? angleBetween(cell, next) : null;
+
+        var rotation;
+        var rotationVariant = 0;
+        if (din === null && dout !== null) {
+          rotation = dout;
+        } else if (dout === null) {
+          rotation = din === null ? 0 : din;
+        } else if (din === dout) {
+          rotation = din;
+        } else {
+          // 弯带的入口侧 = 实体 rotation，出口 = rotation ± 90（variant 2 是 +90，variant 1 是 -90）
+          rotation = din;
+          rotationVariant = dout === (din + 270) % 360 ? 1 : 2;
+        }
+
+        var entity = root.logic.tryPlaceBuilding({
+          origin: new shapez.Vector(cell.x, cell.y),
+          building: meta,
+          rotation: rotation,
+          originalRotation: rotation,
+          rotationVariant: rotationVariant,
+          variant: "default",
+        });
+        if (entity) {
+          placed += 1;
+        } else {
+          failed.push({ index: i, x: cell.x, y: cell.y });
+        }
+      }
+    });
+
+    return { requested: cells.length, placed: placed, failed: failed, layer: layer };
+  }
+
   listBuildings() {
     var variants = shapez.gBuildingVariants || {};
     var result = [];
@@ -736,6 +806,7 @@ class Mod extends shapez.Mod {
   methods = {
     status: this.status,
     listBuildings: this.listBuildings,
+    buildBeltPath: this.buildBeltPath,
     queryResources: this.queryResources,
     inspectTile: this.inspectTile,
     queryEntities: this.queryEntities,

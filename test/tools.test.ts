@@ -39,10 +39,11 @@ function parse(result: { content: { text: string }[] }): unknown {
 }
 
 describe("MCP 工具层", () => {
-  it("注册 13 个工具且名称唯一", () => {
+  it("注册 14 个工具且名称唯一", () => {
     const names = buildTools({ game: fakeGame() }).map((item) => item.name);
-    expect(names).toHaveLength(13);
-    expect(new Set(names).size).toBe(13);
+    expect(names).toHaveLength(14);
+    expect(new Set(names).size).toBe(14);
+    expect(names).toContain("shapez_build_belt_path");
     expect(names).toContain("shapez_query_resources");
     expect(names).toContain("shapez_inspect_tile");
     expect(names).toContain("shapez_place_buildings");
