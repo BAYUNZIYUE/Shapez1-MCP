@@ -1,0 +1,25 @@
+# 本机专用规则文件（可能含绝对路径、内网地址）
+AGENTS.local.md
+
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# 测试与调试产物
+artifacts/
+coverage/
+test-results/
+playwright-report/
+*.log
+
+# 临时文件
+.tmp/
+*.swp
+.DS_Store
+
+# 本地环境
+.env
+.env.*
+!.env.example

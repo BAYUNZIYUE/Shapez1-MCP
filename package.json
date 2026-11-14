@@ -1,0 +1,30 @@
+{
+  "name": "shapez1-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "给 shapez 1（shapez.io 桌面版）对接 agent 基座的 MCP 接口：游戏内 mod + 本地 WebSocket 桥 + stdio MCP server",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "mock": "tsx src/mock-game.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "validate": "npm run typecheck && npm run test",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.0"
+  }
+}
