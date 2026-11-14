@@ -46,6 +46,8 @@ mod/ 与 src/ 无编译期依赖，共享的只有协议字段名
 6. **建筑用 meta id + variant，不是 `belt_forward` 这种拼串**：`belt` 的三种方向是 `rotationVariant` 0/1/2，`code`（`gBuildingVariants` 的 key）是最稳的寻址方式。
 7. **层是字符串 `regular` / `wires`**，不是数字（`root.js` 的 `layers`）。
 8. `productionAnalytics` 的接口是 `getCurrentShapeRatesRaw(dataSource)`，`dataSource` ∈ `produced` / `stored` / `delivered`。
+9. **不要 hook 或替换游戏方法**（`replaceMethod` / `extendClass`）：本 mod 靠订阅信号 + 调公开 API 工作，这是它和其他 mod 能共存的原因。确实要加 hook 时，先确认不会和"多人同步类 mod"抢同一方法。
+10. 其他 mod 注册的建筑走同一条 `registerBuildingVariants → gBuildingVariants` 链路，所以 `list_buildings` 自动包含它们（`code` 可能是 `buildingId` 字符串），无需特判。
 
 ## 构建 & 验证
 
@@ -83,3 +85,5 @@ SHAPEZ1_MCP_HOST=0.0.0.0 SHAPEZ1_MCP_TOKEN=<与 mod 一致> node scripts/live-ch
 - `waitTicks` 是按 60 tick/s × 速度倍率换算的**近似**等待，不是真实 tick 计数；暂停时直接返回。
 - 一个桥同时只服务一个游戏连接，新连接会顶掉旧连接（有意为之，方便重载存档）。
 - 未覆盖：`wires` 层、撤销栈、大批量放置、`set_speed` 存档重载行为、桌面版（Electron）加载路径。见 README「仍未验证」。
+- 与其他 mod 共存已验证（官方示例 base + add_building_basic：60 个变体、新建筑能放能删），但**替换了 `tryPlaceBuilding` 的 mod（多人同步类）未验证**——本 mod 直接调底层 API 会绕过对方。
+- 不支持 shapez Community Edition 的 `.asar` + `mod.json` mod 格式。

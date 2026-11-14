@@ -92,6 +92,16 @@ SHAPEZ1_MCP_BRIDGE_ONLY=1        # 只跑 WS 桥、不开 stdio（配合别的 M
 - 最稳的用法是给 `code`（来自 `gBuildingVariants`，如 1/2/3 = 三种传送带），工具会自动带上正确的 variant 与 rotationVariant。
 - 层是字符串 `regular` / `wires`，不是数字。
 
+## 和其他 mod 的关系（兼容性）
+
+- **可以同时装多个 mod**：桌面版把多个 `.js` 丢进 mods 目录；dev 网页构建用 `externalModUrl` 数组。已实测：官方示例 `base.js` + `add_building_basic.js` + 本 mod 同时加载，建筑变体从 59 变成 60，MCP 工具照常工作。
+- **本 mod 不 hook、不替换任何游戏方法**，只订阅 `gameStarted` / `gameDeserialized` 并调用公开 API，冲突面和“什么都不做的 mod”一样小。
+- **其他 mod 新增的建筑会自动出现**在 `shapez_list_buildings` 里（示例 mod 的新建筑 `code` 就是它的 `buildingId` 字符串），可用 `buildingId` 或该 `code` 放置，已实测能放能删。
+- **需要额外验证的场景**：替换了 `root.logic.tryPlaceBuilding` / `tryDeleteBuilding` 的 mod（例如多人同步 mod）。本 mod 直接调底层 API，会绕过这类 mod 的同步逻辑；两者一起用请先确认对方是否依赖方法 hook。
+- 本 mod **不再声明 `doesNotAffectSavegame`**：agent 会放/删建筑，存档一定被改，卸载前游戏应当正常提示。
+- 游戏会把存档创建时的 mod 列表记进存档，改 mod 后加载会弹「模组警告」（已实测）；这是游戏自身行为，不是本 mod 加的。
+- **不兼容 shapez Community Edition**：CE 换了 mod 格式（`.asar` + `mod.json` + `disabled-mods.json`），本仓库只针对原版 1.x 的单文件 `.js` mod。
+
 ## 在服务器上跑 dev 网页版（远程访问）
 
 官方网页版不加载 mod，但 `G_IS_DEV` 的 dev 构建会，并且官方留了 mod 取用通道 `globalConfig.debug.externalModUrl`。本仓库验证过的一条路径（Linux，无 sudo）：

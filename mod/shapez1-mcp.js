@@ -22,7 +22,7 @@ var METADATA = {
   description: "把游戏状态通过本地 WebSocket 暴露给 MCP server，供 agent 基座读写游戏",
   website: "https://github.com/BAYUNZIYUE/Shapez1-MCP",
   minimumGameVersion: ">=1.5.0",
-  doesNotAffectSavegame: true,
+  // 不声明 doesNotAffectSavegame：agent 会放/删建筑，存档一定被改，卸掉 mod 前要提醒玩家
 };
 
 /** 与本机 MCP server 的衔接配置。
@@ -402,7 +402,7 @@ class Mod extends shapez.Mod {
       }
       var entry = variants[code];
       result.push({
-        code: isNaN(Number(code)) ? code : Number(code),
+        code: code === "undefined" || code === "null" ? null : isNaN(Number(code)) ? code : Number(code),
         buildingId: entry.metaInstance ? entry.metaInstance.getId() : null,
         variant: entry.variant,
         rotationVariant: entry.rotationVariant,
