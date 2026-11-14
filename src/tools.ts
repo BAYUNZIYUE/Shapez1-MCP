@@ -234,6 +234,19 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
       },
     },
     {
+      name: "shapez_dismiss_dialogs",
+      description:
+        "关掉挡住模拟的弹窗（关卡完成弹窗、提示对话框、商店面板）。HUD 暂停时 speed 仍是 regular、miner 和传送带却完全不动，自动化前先调这个。返回关掉了什么以及是否仍在暂停。",
+      inputSchema: z.object({}),
+      handler: async () => {
+        try {
+          return ok(await call("dismissDialogs", {}, 30_000));
+        } catch (error) {
+          return failure("关闭弹窗", error);
+        }
+      },
+    },
+    {
       name: "shapez_hub_goals",
       description: "读取 Hub 升级目标：当前目标进度、已交付数量、各级升级等级、Hub 内已存形状。",
       inputSchema: z.object({}),

@@ -297,6 +297,13 @@ class Mod extends shapez.Mod {
       result.gameVersion = null;
     }
     try {
+      result.pausedByHud = !!root.hud.shouldPauseGame();
+      var unlock = root.hud.parts && root.hud.parts.unlockNotification;
+      result.unlockDialogVisible = !!(unlock && unlock.visible);
+    } catch (error) {
+      result.pausedByHud = null;
+    }
+    try {
       result.speed = root.time && root.time.speed && root.time.speed.constructor.name;
       result.paused = !!(root.time && root.time.speed && root.time.speed.getTimeMultiplier() === 0);
     } catch (error) {
@@ -588,6 +595,69 @@ class Mod extends shapez.Mod {
     return { requested: cells.length, placed: placed, failed: failed, layer: layer };
   }
 
+  /**
+   * 关掉挡住模拟的弹窗：关卡完成弹窗（unlockNotification）会让 hud.shouldPauseGame() 为 true，
+   * 此时 miner/传送带全部停摆，但 status 里的 speed 仍是 RegularGameSpeed。自动化前必须先调这个。
+   */
+  dismissDialogs() {
+    var self = this;
+    var actions = [];
+
+    function pausedNow() {
+      try {
+        return !!self.root.hud.shouldPauseGame();
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function step(depth) {
+      if (depth > 5 || !self.root) {
+        return null;
+      }
+      var hud = self.root.hud;
+      var unlock = hud.parts && hud.parts.unlockNotification;
+      if (unlock && unlock.visible) {
+        actions.push("unlockNotification");
+        try {
+          unlock.requestClose();
+        } catch (error) {
+          unlock.close();
+        }
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            resolve(step(depth + 1));
+          }, 350);
+        });
+      }
+      var dialogs = hud.parts && hud.parts.dialogs;
+      if (dialogs && dialogs.dialogStack && dialogs.dialogStack.length > 0) {
+        var top = dialogs.dialogStack[dialogs.dialogStack.length - 1];
+        actions.push("dialog:" + (top.title || "?"));
+        try {
+          dialogs.closeDialog(top);
+        } catch (error) {
+          /* 忽略 */
+        }
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            resolve(step(depth + 1));
+          }, 220);
+        });
+      }
+      var shop = hud.parts && hud.parts.shop;
+      if (shop && shop.visible && shop.hide) {
+        shop.hide();
+        actions.push("shop");
+      }
+      return null;
+    }
+
+    return Promise.resolve(step(0)).then(function () {
+      return { dismissed: actions, pausedByHud: pausedNow() };
+    });
+  }
+
   listBuildings() {
     var variants = shapez.gBuildingVariants || {};
     var result = [];
@@ -807,6 +877,7 @@ class Mod extends shapez.Mod {
     status: this.status,
     listBuildings: this.listBuildings,
     buildBeltPath: this.buildBeltPath,
+    dismissDialogs: this.dismissDialogs,
     queryResources: this.queryResources,
     inspectTile: this.inspectTile,
     queryEntities: this.queryEntities,

@@ -84,6 +84,7 @@ describe("游戏内 mod（假环境求值）", () => {
       "status",
       "listBuildings",
       "buildBeltPath",
+      "dismissDialogs",
       "queryResources",
       "inspectTile",
       "queryEntities",
