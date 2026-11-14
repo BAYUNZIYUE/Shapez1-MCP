@@ -1,8 +1,8 @@
 # Shapez1-MCP
 
-给 **shapez 1**（shapez.io 桌面版）接一个 MCP 接口：agent 基座通过 MCP 读写游戏状态——查地图、放建筑、读 Hub 目标与产出速率、切游戏速度。
+给 **shapez 1**（shapez.io）接一个 MCP 接口：agent 基座通过 MCP 工具读写游戏状态——查地图、放/删建筑、读 Hub 目标与产出、切游戏速度。
 
-私有仓库，个人使用。当前状态：**骨架可跑通**，桥与 MCP 层有自动化测试；游戏内 mod 已按官方源码写的 API 实现，但**尚未在真实存档里逐项验证**（见下方「未验证项」）。
+私有仓库，个人使用。当前状态：**已在真实游戏里跑通**（见「已验证」）；未覆盖的部分列在「仍未验证」。
 
 ## 架构
 
@@ -11,15 +11,15 @@ agent 基座（MCP client）
         │  stdio（JSON-RPC，换行分隔）
         ▼
 shapez1-mcp（Node 进程）
-  ├── MCP server：10 个 shapez_* 工具
-  └── WS 桥：ws://127.0.0.1:8765（只监听回环）
+  ├── MCP server：11 个 shapez_* 工具
+  └── WS 桥：ws://<主机>:8765（本机默认只监听回环）
         ▲  mod 主动连入
         │
-shapez 桌面版（Electron）
+shapez（Electron 桌面版，或自建的 dev 网页构建）
   └── mod/shapez1-mcp.js → window.shapez（游戏官方暴露面）
 ```
 
-为什么是 WS 桥而不是让 mod 自己当 MCP server：游戏跑在浏览器环境里，起不了监听端口，也没有 stdio；反过来让 Node 侧当 MCP server 最省事，agent 基座按普通 stdio MCP 配置即可。
+为什么是 WS 桥：游戏跑在浏览器上下文里，起不了监听端口也没有 stdio；Node 侧当 MCP server 最省事，agent 基座按普通 stdio MCP 配置即可。
 
 ## 快速开始
 
@@ -35,7 +35,7 @@ shapez 桌面版（Electron）
 
 游戏内 `Mods` 菜单有 “Open Mods Folder”。mod 只在启动时扫描，热改无效；开发时用 `--dev` 启动项，菜单里有 Restart。
 
-**只有桌面版（Steam / itch / GOG）加载 mod**，网页版没有 `window.shapez`。有 mod 时游戏会关闭 Steam 成就与统计，这是游戏自身行为。
+**只有桌面版（Steam / itch / GOG）和自建的 dev 网页构建加载 mod**；官方网页版（shapez.io）没有 `window.shapez`。有 mod 时游戏会关闭 Steam 成就与统计，这是游戏自身行为。
 
 ### 2. 起 MCP server
 
@@ -45,14 +45,14 @@ npm start          # 默认桥端口 8765
 ```
 
 ```bash
-# 可选环境变量
-SHAPEZ1_MCP_PORT=8765      # 桥端口；改了要同步 mod 顶部 CONFIG.url
-SHAPEZ1_MCP_HOST=127.0.0.1 # 不要改成 0.0.0.0
-SHAPEZ1_MCP_TOKEN=xxxx     # 启用后 mod 的 CONFIG.token 必须一致
+SHAPEZ1_MCP_PORT=8765            # 桥端口；改了要同步 mod 的 CONFIG.port
+SHAPEZ1_MCP_HOST=127.0.0.1       # 远程/网页部署时要改成 0.0.0.0（此时必须配 token）
+SHAPEZ1_MCP_TOKEN=xxxx           # 非回环部署必填；mod 的 CONFIG.token 必须一致
 SHAPEZ1_MCP_TIMEOUT_MS=15000
+SHAPEZ1_MCP_BRIDGE_ONLY=1        # 只跑 WS 桥、不开 stdio（配合别的 MCP client 或调试用）
 ```
 
-游戏启动后会自动连上（mod 每 3 秒重试），`shapez_status` 里能看到 `bridge.connected: true`。
+游戏启动后自动连上（mod 每 3 秒重试），`shapez_status` 里能看到 `bridge.connected: true`。
 
 ### 3. 接到 agent 基座
 
@@ -68,85 +68,109 @@ SHAPEZ1_MCP_TIMEOUT_MS=15000
 }
 ```
 
+一个桥同时只服务一个游戏连接，也只能被一个进程占用端口：**要么** agent 基座拉起 `npm start`（推荐，进程跟着 client 走），**要么**手动 `SHAPEZ1_MCP_BRIDGE_ONLY=1` 常驻桥、再另想办法接 MCP（当前没做多客户端共享）。
+
 ## 工具
 
 | 工具 | 作用 |
 |---|---|
-| `shapez_status` | 连接状态、是否已加载存档、游戏版本、速度/暂停、当前层、相机、实体总数 |
-| `shapez_place_building` | 在瓦片坐标放一个建筑（`buildingId`、`x`、`y`、`rotation`、`variant`） |
-| `shapez_place_buildings` | 批量放置（游戏内 `performBulkOperation` 包裹，最多 5000 条，单条失败不影响其余） |
-| `shapez_delete_building` | 删除瓦片上的建筑 |
+| `shapez_status` | 连接状态、是否已加载存档、速度/暂停、当前层（`regular`/`wires`）、相机、实体总数 |
+| `shapez_list_buildings` | **放置前先调**：列出 59 个建筑变体的 `code`、`buildingId`、`variant`、`rotationVariant`、占地 |
+| `shapez_place_building` | 放一个建筑：`code`（推荐）或 `buildingId`+`variant`，加 `x`/`y`/`rotation` |
+| `shapez_place_buildings` | 批量放置（游戏内 `performBulkOperation` 包裹，≤5000 条，单条失败不影响其余） |
+| `shapez_delete_building` | 删掉某瓦片上的建筑（可指定层） |
 | `shapez_query_entities` | 按矩形范围/层/建筑 id 查实体，带 `limit` 与 `truncated` |
-| `shapez_hub_goals` | Hub 目标进度、已交付、升级等级、Hub 内已存形状 |
-| `shapez_production_rates` | 各形状当前/历史产出速率 |
-| `shapez_decode_shape` | 形状短码 → 四层四象限结构（subShape + color） |
+| `shapez_hub_goals` | 等级、当前目标（形状/需求/已交付）、Hub 已存形状、各升级等级与加成 |
+| `shapez_production_rates` | 产出/库存/交付三种数据源下各形状的切片数量 |
+| `shapez_decode_shape` | 形状短码 → 四层四象限（`subShape` 是 `circle`/`rect` 这类全名，`color` 是 `uncolored`/`red`…） |
 | `shapez_set_speed` | `paused` / `regular` / `fast_forward`（不写存档） |
-| `shapez_wait_ticks` | 按当前速度等待若干 tick（近似，暂停时直接返回） |
+| `shapez_wait_ticks` | 按当前速度等待若干 tick（近似，暂停时立即返回） |
 
-工具层只做参数校验与错误包装，**所有游戏交互在 mod 侧**：游戏 API 变了只改 `mod/shapez1-mcp.js`。
+放置建筑的关键事实（都已在游戏里验证）：
 
-## 桥协议
+- 建筑用的是 **meta id**（`belt`、`miner`、`balancer`、`cutter` …），**没有 `belt_forward` 这种 id**；方向由 `rotationVariant`（传送带 0=直行 1=左转 2=右转）与 `rotation` 决定。
+- 最稳的用法是给 `code`（来自 `gBuildingVariants`，如 1/2/3 = 三种传送带），工具会自动带上正确的 variant 与 rotationVariant。
+- 层是字符串 `regular` / `wires`，不是数字。
 
-见 `src/protocol.ts`（唯一权威定义）：
+## 在服务器上跑 dev 网页版（远程访问）
 
-| 方向 | 消息 |
-|---|---|
-| mod → 桥 | `hello`（protocol / token / modVersion）、`response`（id / ok / result / error）、`event` |
-| 桥 → mod | `hello-ok`、`request`（id / method / params） |
+官方网页版不加载 mod，但 `G_IS_DEV` 的 dev 构建会，并且官方留了 mod 取用通道 `globalConfig.debug.externalModUrl`。本仓库验证过的一条路径（Linux，无 sudo）：
 
-- 协议版本 `1`，不匹配直接断开。
-- **所有请求都由桥发起**，mod 不需要处理并发调用。
-- 单次调用默认 15 秒超时；批量放置 120 秒，查询 60 秒，等待 tick 65 秒。
-- 新连接会替换旧连接（方便重载存档后不用重启 MCP server）。
+```bash
+# 1) 依赖：Node 16 + Java（atlas 打包）+ ffmpeg（音频转码），都不用装到系统
+#    Node 16 tarball → ~/.local/share/shapez-toolchain/node-v16.20.2-linux-x64
+#    Temurin JRE 17 → ~/.local/share/shapez-toolchain/jre17
+#    johnvansickle 静态 ffmpeg → ~/.local/share/shapez-toolchain/bin/ffmpeg
+git clone --depth 1 https://github.com/tobspr-games/shapez.io shapez-io-dev
+cd shapez-io-dev && yarn install            # 约 5 GB node_modules
+cd gulp && yarn install && cd ..
+
+# 2) 告诉 dev 构建从哪里取 mod：同源、相对路径（browser-sync 的第二 root 是 mod_examples）
+cat > src/js/core/config.local.js <<'EOF'
+export default { externalModUrl: "/shapez1-mcp.js" };
+EOF
+cp <本仓库>/mod/shapez1-mcp.js mod_examples/shapez1-mcp.js   # token 填进 CONFIG.token
+
+# 3) 起服务（默认任务 = serve.web-localhost，browser-sync 监听 :3005，所有网卡）
+PATH=~/.local/share/shapez-toolchain/bin:$PATH cd gulp && PATH=... yarn gulp
+```
+
+两个坑，踩过：
+
+- **Java 不是可选项**：每次启动都会删 `res_built` 并重建 atlas，jar 下载失败只会 warn，结果是“编得过、贴图全崩”。
+- **fluent-ffmpeg 2.1.2 与 ffmpeg 7 的 `-formats` 输出不兼容**：解析出 0 个格式，`sounds.sfxOptimize` 报 `Output format mp3 is not available`。本地补丁在 `gulp/node_modules/fluent-ffmpeg/lib/capabilities.js` 的 `getAvailableFormats` 里（兼容两代列宽），重装依赖后要重新打。
+
+访问 `http://<服务器>:3005`。跨机时 mod 自动连 `ws://<页面主机>:8765`，**必须同时配 `CONFIG.token` 与 `SHAPEZ1_MCP_TOKEN` 并把桥绑到 `0.0.0.0`**（非回环且无 token 时 mod 会拒绝加载）。
 
 ## 开发
 
 ```bash
 npm install
-npm start                 # 起 MCP server
-npm run mock              # 另开一个终端：假游戏端，连上桥，用于没装游戏时联调
-npm run typecheck         # 只跑类型检查
-npm run test              # vitest：协议 / 桥 / 工具层 / MCP stdio 端到端
+npm start                 # MCP server（stdio + 桥）
+npm run mock              # 另开终端：假游戏端，没装游戏时联调
+npm run typecheck         # 类型检查
+npm run test              # vitest：协议 / 桥 / 工具 / mod 求值 / MCP stdio 端到端
 npm run validate          # typecheck + test（收尾必跑）
 npm run build             # 编译到 dist/
 ```
 
-`npm run mock` 的假游戏有编造的建筑表与 Hub 数据，只验证链路与错误透传，**不能替代游戏内验证**。
+真实游戏联调（需要先在游戏里进入存档、桥已启动）：
+
+```bash
+SHAPEZ1_MCP_TOKEN=... node scripts/live-check.mjs
+```
+
+它会拉起 MCP server，依次验证：`status` → `list_buildings` → 放一条传送带 → 查询确认 → 删除确认 → Hub/产出/形状解析 是否报错。
 
 ## 安全
 
-- mod 跑在游戏页面里，拥有页面全部权限，并通过 `contextBridge` 能碰到 `ipcRenderer`（可读写 `saves/` 目录）。所以：桥只监听 `127.0.0.1`；`CONFIG.url` 只接受回环地址（mod 里有断言，改成局域网地址会拒绝加载）。
-- 一个桥同时只服务一个游戏连接；token 非空时强制校验。
-- 不要把桥端口暴露到公网，也不要在 remote URL / 提交里放 token。
+- mod 跑在游戏页面里，拥有页面全部权限，并能通过 `contextBridge` 碰到 `ipcRenderer`（可读写 `saves/`）。所以远程部署**必须**配 token；mod 里对非回环地址强制校验 token（没配直接拒绝加载）。
+- 桥默认只绑 `127.0.0.1`；绑 `0.0.0.0` 只应在自己的内网里做，别暴露到公网。
+- 不要把 token 提交进仓库（`mod_examples` 里的那份是部署副本，不进 git）。
 
 ## 合规
 
-- 本仓库**不分发游戏源码或美术素材**，mod 只调用游戏运行时已暴露的 API。
-- shapez 原版仓库 `LICENSE` 是 GPL-3.0（`package.json` 里的 `"license": "MIT"` 与之冲突，不可依赖）。这里不含游戏代码，因此不复制其许可；如果后续把游戏代码拷进来，必须按 GPL-3.0 处理。
-- `mods` 目录里的东西会被游戏执行，请只放自己信得过的文件。
+- 本仓库不分发游戏源码或美术素材，mod 只调用游戏运行时已暴露的 API。
+- shapez 原版仓库 `LICENSE` 是 GPL-3.0（`package.json` 里的 `"license": "MIT"` 与之冲突，不可依赖）。这里不含游戏代码；如果后续把游戏代码拷进来，必须按 GPL-3.0 处理。
 
-## 未验证项（重要）
+## 已验证（真实游戏，2026-11-14）
 
-以下按官方源码写的，**没有在真实游戏中逐项确认**，第一次跑请对照游戏内 DevTools 控制台：
+在自建 dev 网页构建（`serve.web-localhost`）+ 局域网浏览器里验证过：
 
-1. Steam 现行 1.6.x 的 ModLoader 与公开仓库 `master`（最新 tag 1.5.1）是否一致。
-2. `root.hubGoals` 的 `currentGoalIndex` / `upgradeLevels` / `storedShapes` 字段名与结构。
-3. `root.productionAnalytics.getCurrentShapeRatesRaw()` / `getPastShapeRate(600)` 的入参与返回结构。
-4. `staticMapEntity.getTileSpaceBounds()` 返回的 `w` / `h` 是否为瓦片尺寸。
-5. `root.logic.tryPlaceBuilding` 放置是否进入撤销栈。
-6. `root.time.speed` 替换后存档再读回的表现（预期回到正常速度）。
-7. `shapez.PausedGameSpeed` / `FastForwardGameSpeed` / `RegularGameSpeed` 是否都在 `window.shapez` 上可访问。
+- mod 加载、token 校验、断线重连、`hello`/请求-响应链路正常。
+- `status`：`hasSave`、速度 `RegularGameSpeed`、暂停、当前层、相机、实体数。
+- `list_buildings`：59 个变体，`belt` 的 code 是 1/2/3。
+- `place_building`（用 `code` 放传送带）→ `query_entities` 确认 → `delete_building` → 再查为空，完整闭环。
+- `hub_goals`：等级 1、目标形状 `CuCuCuCu`、需求 10、升级等级与加成。
+- `decode_shape`：`CuCuCuCu` → 4 个 `circle`/`uncolored` 象限。
+- `production_rates`：三个数据源都返回对象（新存档为空，不报错）。
 
-失败时 mod 会 `console.warn("[Shapez1-MCP] …")`，用 `--dev` 启动项打开控制台看。
+## 仍未验证
 
-## 目录
-
-```
-mod/shapez1-mcp.js   游戏内 mod（单文件，游戏不认 mod.json）
-src/protocol.ts      桥协议定义（唯一权威）
-src/bridge.ts        WS 桥：hello/token/请求超时/连接替换
-src/tools.ts         10 个 MCP 工具定义（与 server 解耦，便于单测）
-src/index.ts         入口：起桥 + stdio MCP server（日志只走 stderr）
-src/mock-game.ts     假游戏端（联调与测试用）
-test/                协议、桥、工具、MCP 端到端
-```
+1. `wires` 层上的放置/查询/删除（电线、逻辑门）。
+2. 放置是否进入撤销栈；`place_buildings` 大批量（上千条）的表现。
+3. `wait_ticks` 的换算是否接近真实 tick 速率（当前按 60 tick/s × 速度倍率估算）。
+4. `set_speed` 后存档再读回的行为（预期回正常速度）。
+5. `production_rates` 有真实产出时的数值语义（现在只有空对象；切片时长见游戏 `analyticsSliceDurationSeconds`）。
+6. Steam 现行 1.6.x 的 ModLoader 与公开仓库（tag 1.5.1）是否一致；`gameVersion` 在 dev 构建里拿不到（返回 `null`）。
+7. 桌面版（Electron）里同一套 mod 的加载路径（代码相同，但未在本机跑过）。

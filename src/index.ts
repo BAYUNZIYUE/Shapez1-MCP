@@ -50,13 +50,19 @@ if (port !== 8765) {
 }
 
 let servers = 0;
-serveStdio(() => {
-  servers += 1;
-  const server = new McpServer({ name: "shapez1-mcp", version: VERSION });
-  registerTools(server, { game: bridge, log });
-  log(`[mcp] 第 ${servers} 个客户端接入（stdio）`);
-  return server;
-});
+const bridgeOnly = process.env["SHAPEZ1_MCP_BRIDGE_ONLY"] === "1";
+if (bridgeOnly) {
+  // 部署模式：只跑 WS 桥，不占 stdio（多个 MCP 客户端各自起自己的 server 连同一座桥时用）
+  log("[启动] SHAPEZ1_MCP_BRIDGE_ONLY=1：仅运行 WS 桥，不提供 stdio MCP 通道");
+} else {
+  serveStdio(() => {
+    servers += 1;
+    const server = new McpServer({ name: "shapez1-mcp", version: VERSION });
+    registerTools(server, { game: bridge, log });
+    log(`[mcp] 第 ${servers} 个客户端接入（stdio）`);
+    return server;
+  });
+}
 
 const shutdown = async (signal: string): Promise<void> => {
   log(`[退出] 收到 ${signal}，关闭桥`);

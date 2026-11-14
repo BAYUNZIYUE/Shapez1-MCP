@@ -25,9 +25,13 @@ var METADATA = {
   doesNotAffectSavegame: true,
 };
 
-/** 与本机 MCP server 的衔接配置。端口/地址改这里，token 需与 SHAPEZ1_MCP_TOKEN 一致。 */
+/** 与本机 MCP server 的衔接配置。
+ *  url 留空 = 自动连 ws://<当前页面主机>:port —— 远程部署（游戏从服务器打开）时自动指向该服务器。
+ *  非回环地址**必须**同时配 token，否则 mod 拒绝连接（见 assertSafeUrl）。
+ */
 var CONFIG = {
-  url: "ws://127.0.0.1:8765",
+  url: "",
+  port: 8765,
   token: "",
   reconnectDelayMs: 3000,
   helloTimeoutMs: 5000,
@@ -35,11 +39,26 @@ var CONFIG = {
 
 var PROTOCOL_VERSION = 1;
 
-/** 只许本机回环地址：mod 拥有页面全部权限（包括 ipcRenderer 的存档读写）。 */
-function assertLoopback(url) {
-  if (!/^ws:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(url)) {
-    throw new Error("Shapez1-MCP: CONFIG.url 必须是本机回环地址，拒绝连接 " + url);
+function isLoopbackHost(host) {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+}
+
+/** 解析出实际 WS 地址；非回环且没配 token 直接抛错，避免把有 ipcRenderer 权限的 mod 暴露到局域网。 */
+function resolveUrl() {
+  var url = CONFIG.url;
+  if (!url) {
+    url = "ws://" + (window.location.hostname || "127.0.0.1") + ":" + CONFIG.port;
   }
+  var match = /^ws:\/\/([^/:]+)(:\d+)?$/.exec(url);
+  if (!match) {
+    throw new Error("Shapez1-MCP: WS 地址不合法: " + url);
+  }
+  if (!isLoopbackHost(match[1]) && !CONFIG.token) {
+    throw new Error(
+      "Shapez1-MCP: 目标不是本机回环地址（" + match[1] + "），必须同时配置 CONFIG.token 与 SHAPEZ1_MCP_TOKEN",
+    );
+  }
+  return url;
 }
 
 function errorPayload(error) {
@@ -68,7 +87,7 @@ class Mod extends shapez.Mod {
       this.emit("gameDeserialized", {});
     });
 
-    assertLoopback(CONFIG.url);
+    this.wsUrl = resolveUrl();
     this.connect();
   }
 
@@ -80,7 +99,7 @@ class Mod extends shapez.Mod {
     }
     var socket;
     try {
-      socket = new WebSocket(CONFIG.url);
+      socket = new WebSocket(this.wsUrl);
     } catch (error) {
       this.log("建立连接失败: " + errorPayload(error).message);
       this.scheduleReconnect();
@@ -161,7 +180,7 @@ class Mod extends shapez.Mod {
     if (message.type === "hello-ok") {
       this.helloOk = true;
       this.connectedAt = Date.now();
-      this.log("已连上 MCP 桥 " + CONFIG.url);
+      this.log("已连上 MCP 桥 " + this.wsUrl);
       return;
     }
 
@@ -274,7 +293,7 @@ class Mod extends shapez.Mod {
       if (params.buildingId && info.buildingId !== params.buildingId) {
         continue;
       }
-      if (params.layer !== undefined && params.layer !== null && info.layer !== params.layer) {
+      if (params.layer && info.layer !== params.layer) {
         continue;
       }
       if (bounds && !intersects(info, bounds)) {
@@ -291,35 +310,38 @@ class Mod extends shapez.Mod {
 
   hubGoals() {
     var hub = this.requireRoot().hubGoals;
-    var result = { upgrades: {}, stored: [] };
+    var result = { level: hub.level, delivered: null, required: null, throughputOnly: null, stored: [], upgrades: {} };
 
-    try {
-      result.goalIndex = hub.currentGoalIndex !== undefined ? hub.currentGoalIndex : hub.goalIndex;
-    } catch (error) {
-      result.goalIndex = null;
-    }
     try {
       result.delivered = hub.getCurrentGoalDelivered();
     } catch (error) {
-      result.delivered = null;
+      result.deliveredError = errorPayload(error).message;
     }
     try {
-      var stored = hub.storedShapes;
-      if (stored && typeof stored.forEach === "function") {
-        stored.forEach(function (amount, key) {
-          result.stored.push({ key: key, amount: amount });
-        });
+      if (hub.currentGoal) {
+        result.required = hub.currentGoal.required;
+        result.throughputOnly = !!hub.currentGoal.throughputOnly;
+        result.goalShape = hub.currentGoal.definition ? hub.currentGoal.definition.getHash() : null;
+      }
+    } catch (error) {
+      result.goalError = errorPayload(error).message;
+    }
+    try {
+      var stored = hub.storedShapes || {};
+      for (var key in stored) {
+        if (Object.prototype.hasOwnProperty.call(stored, key)) {
+          result.stored.push({ key: key, amount: stored[key] });
+        }
       }
     } catch (error) {
       result.stored = [];
     }
     try {
-      var levels = hub.upgradeLevels;
-      if (levels) {
-        for (var id in levels) {
-          if (Object.prototype.hasOwnProperty.call(levels, id)) {
-            result.upgrades[id] = levels[id];
-          }
+      var levels = hub.upgradeLevels || {};
+      var improvements = hub.upgradeImprovements || {};
+      for (var id in levels) {
+        if (Object.prototype.hasOwnProperty.call(levels, id)) {
+          result.upgrades[id] = { level: levels[id], improvement: improvements[id] };
         }
       }
     } catch (error) {
@@ -330,20 +352,15 @@ class Mod extends shapez.Mod {
 
   productionRates() {
     var analytics = this.requireRoot().productionAnalytics;
-    var result = { current: null, past: null, note: "字段名取自游戏源码，未在真实存档逐项核对" };
-    try {
-      if (analytics && analytics.getCurrentShapeRatesRaw) {
-        result.current = toPlain(analytics.getCurrentShapeRatesRaw());
+    var result = { produced: null, stored: null, delivered: null, unit: "每种形状在最近一个统计切片内的数量（不是每秒）" };
+    var sources = ["produced", "stored", "delivered"];
+    for (var i = 0; i < sources.length; i++) {
+      var source = sources[i];
+      try {
+        result[source] = toPlain(analytics.getCurrentShapeRatesRaw(source));
+      } catch (error) {
+        result[source + "Error"] = errorPayload(error).message;
       }
-    } catch (error) {
-      result.currentError = errorPayload(error).message;
-    }
-    try {
-      if (analytics && analytics.getPastShapeRate) {
-        result.past = toPlain(analytics.getPastShapeRate(600));
-      }
-    } catch (error) {
-      result.pastError = errorPayload(error).message;
     }
     return result;
   }
@@ -376,27 +393,67 @@ class Mod extends shapez.Mod {
     return { valid: true, key: key, hash: definition.getHash(), layers: layers };
   }
 
+  listBuildings() {
+    var variants = shapez.gBuildingVariants || {};
+    var result = [];
+    for (var code in variants) {
+      if (!Object.prototype.hasOwnProperty.call(variants, code)) {
+        continue;
+      }
+      var entry = variants[code];
+      result.push({
+        code: isNaN(Number(code)) ? code : Number(code),
+        buildingId: entry.metaInstance ? entry.metaInstance.getId() : null,
+        variant: entry.variant,
+        rotationVariant: entry.rotationVariant,
+        width: entry.tileSize ? entry.tileSize.x : null,
+        height: entry.tileSize ? entry.tileSize.y : null,
+      });
+    }
+    return { count: result.length, buildings: result };
+  }
+
   // ---------------------------------------------------------------- 写接口
 
   placeBuilding(params) {
     var root = this.requireRoot();
-    var building = shapez.gMetaBuildingRegistry.findById(params.buildingId);
-    if (!building) {
-      return { ok: false, reason: "未知建筑 id: " + String(params.buildingId) };
+    var building = null;
+    var variant = typeof params.variant === "string" && params.variant ? params.variant : "default";
+    var rotationVariant = params.rotationVariant || 0;
+
+    if (params.code !== undefined && params.code !== null) {
+      var info = shapez.gBuildingVariants ? shapez.gBuildingVariants[params.code] : null;
+      if (!info) {
+        return { ok: false, reason: "未知建筑编号 code: " + String(params.code) + "（先用 shapez_list_buildings 查）" };
+      }
+      building = info.metaInstance;
+      variant = info.variant;
+      rotationVariant = info.rotationVariant;
+    } else {
+      building = shapez.gMetaBuildingRegistry.findById(params.buildingId);
     }
+
     var rotation = params.rotation || 0;
     var entity = root.logic.tryPlaceBuilding({
       origin: new shapez.Vector(params.x, params.y),
       building: building,
       rotation: rotation,
       originalRotation: rotation,
-      rotationVariant: params.rotationVariant || 0,
-      variant: params.variant || 0,
+      rotationVariant: rotationVariant,
+      variant: variant,
     });
     if (!entity) {
       return { ok: false, reason: "放置失败：位置被占用或地形不允许" };
     }
-    return { ok: true, uid: entity.uid, buildingId: params.buildingId };
+    return {
+      ok: true,
+      uid: entity.uid,
+      buildingId: params.buildingId || null,
+      code: params.code === undefined ? null : params.code,
+      variant: variant,
+      rotationVariant: rotationVariant,
+      rotation: rotation,
+    };
   }
 
   placeBuildings(params) {
@@ -425,15 +482,15 @@ class Mod extends shapez.Mod {
 
   deleteBuilding(params) {
     var root = this.requireRoot();
-    var layer = params.layer === undefined || params.layer < 0 ? root.currentLayer : params.layer;
+    var layer = params.layer || root.currentLayer;
     var entity = root.map.getLayerContentXY(params.x, params.y, layer);
     if (!entity) {
-      return { ok: false, reason: "该位置没有建筑" };
+      return { ok: false, reason: "该位置（层 " + layer + "）没有建筑" };
     }
-    var info = this.describeEntity(entity);
     if (!entity.uid) {
       return { ok: false, reason: "该位置的内容不是可删除的建筑" };
     }
+    var info = this.describeEntity(entity);
     root.logic.tryDeleteBuilding(entity);
     return { ok: true, uid: entity.uid, buildingId: info ? info.buildingId : null, layer: layer };
   }
@@ -550,6 +607,7 @@ class Mod extends shapez.Mod {
 
   methods = {
     status: this.status,
+    listBuildings: this.listBuildings,
     queryEntities: this.queryEntities,
     hubGoals: this.hubGoals,
     productionRates: this.productionRates,

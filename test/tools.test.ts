@@ -39,17 +39,18 @@ function parse(result: { content: { text: string }[] }): unknown {
 }
 
 describe("MCP 工具层", () => {
-  it("注册 10 个工具且名称唯一", () => {
+  it("注册 11 个工具且名称唯一", () => {
     const names = buildTools({ game: fakeGame() }).map((item) => item.name);
-    expect(names).toHaveLength(10);
-    expect(new Set(names).size).toBe(10);
+    expect(names).toHaveLength(11);
+    expect(new Set(names).size).toBe(11);
     expect(names).toContain("shapez_place_buildings");
+    expect(names).toContain("shapez_list_buildings");
   });
 
   it("place_building 把参数原样下发给游戏端", async () => {
     const game = fakeGame();
     const result = await tool("shapez_place_building", game).handler({
-      buildingId: "belt_forward",
+      buildingId: "belt",
       x: 3,
       y: -2,
       rotation: 1,
@@ -57,15 +58,16 @@ describe("MCP 工具层", () => {
     expect(result.isError).toBeUndefined();
     expect(game.calls).toHaveLength(1);
     expect(game.calls[0]?.method).toBe("placeBuilding");
-    expect(game.calls[0]?.params).toMatchObject({ buildingId: "belt_forward", x: 3, y: -2, rotation: 1 });
+    expect(game.calls[0]?.params).toMatchObject({ buildingId: "belt", x: 3, y: -2, rotation: 1 });
   });
 
   it("输入校验：非法旋转与越界 limit 被 schema 拒绝", () => {
     const schema = tool("shapez_place_building", fakeGame()).inputSchema;
-    expect(schema.safeParse({ buildingId: "belt_forward", x: 0, y: 0, rotation: 5 }).success).toBe(false);
+    expect(schema.safeParse({ buildingId: "belt", x: 0, y: 0, rotation: 5 }).success).toBe(false);
     expect(schema.safeParse({ buildingId: "", x: 0, y: 0 }).success).toBe(false);
-    expect(schema.safeParse({ buildingId: "belt_forward", x: 0.5, y: 0 }).success).toBe(false);
-    expect(schema.safeParse({ buildingId: "belt_forward", x: 0, y: 0 }).success).toBe(true);
+    expect(schema.safeParse({ buildingId: "belt", x: 0.5, y: 0 }).success).toBe(false);
+    expect(schema.safeParse({ buildingId: "belt", x: 0, y: 0 }).success).toBe(true);
+    expect(schema.safeParse({ code: 1, x: 0, y: 0 }).success).toBe(true);
 
     const query = tool("shapez_query_entities", fakeGame()).inputSchema;
     expect(query.safeParse({ limit: 5000 }).success).toBe(false);

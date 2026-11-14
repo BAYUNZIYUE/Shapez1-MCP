@@ -35,13 +35,23 @@ const rotationSchema = z
   .describe("旋转，0=上 1=右 2=下 3=左（顺时针）");
 
 const placementSchema = z.object({
-  buildingId: z.string().min(1).describe("建筑 id，例如 belt_forward、miner、balancer"),
+  buildingId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("建筑 id（Metabuilding 的 id），如 belt、miner、balancer、cutter；与 code 二选一"),
+  code: z
+    .union([z.number().int(), z.string()])
+    .optional()
+    .describe("建筑变体编号（gBuildingVariants 的 key，如 1=Belt 直行）。给 code 时忽略 buildingId/variant/rotationVariant；编号用 shapez_list_buildings 查"),
   x: z.number().int().describe("左上角瓦片 x 坐标（整数）"),
   y: z.number().int().describe("左上角瓦片 y 坐标（整数）"),
   rotation: rotationSchema.optional(),
-  variant: z.number().int().min(0).optional().describe("建筑变体索引，默认 0"),
-  rotationVariant: z.number().int().min(0).optional().describe("方向变体索引，默认 0"),
+  variant: z.string().optional().describe("变体名（字符串），如 default、chainable，默认 default"),
+  rotationVariant: z.number().int().min(0).optional().describe("方向变体索引，默认 0（传送带 0=直行 1=左转 2=右转）"),
 });
+
+const layerSchema = z.enum(["regular", "wires"]).describe("层：regular（普通）或 wires（电线层）");
 
 /**
  * 工具定义表。与 MCP server 解耦，便于单测直接调用 handler（不经过 stdio 传输）。
@@ -76,9 +86,22 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
       },
     },
     {
+      name: "shapez_list_buildings",
+      description:
+        "列出游戏里全部可放置建筑变体：code（放进 place 时的编号）、buildingId、variant、rotationVariant、占地尺寸。放置建筑前先调这个拿准确编号，不要猜 id。",
+      inputSchema: z.object({}),
+      handler: async () => {
+        try {
+          return ok(await call("listBuildings"));
+        } catch (error) {
+          return failure("列出建筑", error);
+        }
+      },
+    },
+    {
       name: "shapez_place_building",
       description:
-        "在指定瓦片放置一个建筑（直接调用游戏内部建造接口，等同玩家手动放置，但不会自动进入多连放）。返回新实体的 uid；位置非法或被占用时返回 ok=false。",
+        "在指定瓦片放置一个建筑（直接调用游戏内部建造接口，等同玩家手动放置，但不会自动进入多连放）。用 buildingId+variant 或 code 指定建筑，id 要先用 shapez_list_buildings 查。返回新实体的 uid；位置非法或被占用时返回 ok=false。",
       inputSchema: placementSchema,
       handler: async (args) => {
         try {
@@ -109,7 +132,7 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
       inputSchema: z.object({
         x: z.number().int(),
         y: z.number().int(),
-        layer: z.number().int().min(-1).max(4).optional().describe("层号，-1 表示当前层，默认 -1"),
+        layer: layerSchema.optional().describe("层，默认当前层"),
       }),
       handler: async (args) => {
         try {
@@ -128,7 +151,7 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
         y1: z.number().int().optional(),
         x2: z.number().int().optional(),
         y2: z.number().int().optional(),
-        layer: z.number().int().min(0).max(3).optional().describe("层号，不传则所有层"),
+        layer: layerSchema.optional().describe("层，不传则所有层"),
         buildingId: z.string().min(1).optional().describe("只返回该建筑 id 的实体"),
         limit: z.number().int().min(1).max(2000).default(200).describe("最多返回条数，默认 200"),
       }),
