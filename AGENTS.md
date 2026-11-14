@@ -84,6 +84,13 @@ SHAPEZ1_MCP_HOST=0.0.0.0 SHAPEZ1_MCP_TOKEN=<与 mod 一致> node scripts/live-ch
 - 服务：`cd shapez-io-dev/gulp && PATH=~/.local/share/shapez-toolchain/bin:<node16>/bin:$PATH yarn gulp`，browser-sync 监听 `:3005` 所有网卡。
 - 桥这边：`SHAPEZ1_MCP_HOST=0.0.0.0 SHAPEZ1_MCP_TOKEN=<token> SHAPEZ1_MCP_BRIDGE_ONLY=1 npm start`。一个桥只能被一个进程占用，所以常驻桥和「agent client 自己拉 MCP server」二选一。
 
+## 进度与关卡表（重要）
+
+- 本机 dev 网页构建的关卡表被改过：`generateLevelsForVariant()` 里 `G_IS_DEV` 也走 `STANDALONE_LEVELS()`（26 关）。不改的话只有 9 关 demo 表。
+- 第 1–5 关是真实生产打通的（脚本建线 + 交付）；第 6–24 关用 `shapez_dev_skip_goal` 推进（游戏自带 dev 捷径，等同按 `p`），因为需求是 270–25000 个多层/染色形状，单会话建不出来。
+- 跳关后必须调 `shapez_save_game`：自动存档默认 60 秒一次，不落盘就刷新页面会退回旧关卡（踩过）。
+- 关卡完成弹窗会暂停模拟；dev 构建里可用 `config.local.js` 的 `disableUnlockDialog: true` 关掉它（仍在 `shapez_dismiss_dialogs` 里兜底）。
+
 ## 已知问题
 
 - `gameVersion` 在 dev 网页构建里拿不到（`G_BUILD_VERSION` 不是全局），返回 `null`。

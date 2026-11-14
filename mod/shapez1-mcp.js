@@ -369,7 +369,18 @@ class Mod extends shapez.Mod {
 
   hubGoals() {
     var hub = this.requireRoot().hubGoals;
-    var result = { level: hub.level, delivered: null, required: null, throughputOnly: null, stored: [], upgrades: {} };
+    var result = {
+      level: hub.level,
+      levelCount:
+        this.root && this.root.gameMode && this.root.gameMode.getLevelDefinitions
+          ? this.root.gameMode.getLevelDefinitions().length
+          : null,
+      delivered: null,
+      required: null,
+      throughputOnly: null,
+      stored: [],
+      upgrades: {},
+    };
 
     try {
       result.delivered = hub.getCurrentGoalDelivered();
@@ -394,6 +405,24 @@ class Mod extends shapez.Mod {
       }
     } catch (error) {
       result.stored = [];
+    }
+    try {
+      var rewards = shapez.enumHubGoalRewards || {};
+      var unlocked = [];
+      for (var rewardKey in rewards) {
+        if (Object.prototype.hasOwnProperty.call(rewards, rewardKey)) {
+          try {
+            if (hub.isRewardUnlocked(rewards[rewardKey])) {
+              unlocked.push(rewardKey);
+            }
+          } catch (error) {
+            /* 单个奖励查询失败不影响整体 */
+          }
+        }
+      }
+      result.unlockedRewards = unlocked;
+    } catch (error) {
+      result.unlockedRewards = null;
     }
     try {
       var levels = hub.upgradeLevels || {};
@@ -658,6 +687,44 @@ class Mod extends shapez.Mod {
     });
   }
 
+  /**
+   * dev 构建专用的「直接完成当前目标」——和游戏里按 p 键跳过目标是同一条路径
+   * （hub_goals 的 G_IS_DEV 监听器调的就是 onGoalCompleted）。只在 dev 构建里有效。
+   */
+  devSkipGoal() {
+    var root = this.requireRoot();
+    var hub = root.hubGoals;
+    if (typeof hub.isEndOfDemoReached === "function" && hub.isEndOfDemoReached()) {
+      return { skipped: false, reason: "已到当前关卡表的最后一关", level: hub.level };
+    }
+    var before = hub.level;
+    hub.onGoalCompleted();
+    return {
+      skipped: hub.level !== before,
+      level: hub.level,
+      levelCount: root.gameMode && root.gameMode.getLevelDefinitions ? root.gameMode.getLevelDefinitions().length : null,
+      goalShape: hub.currentGoal && hub.currentGoal.definition ? hub.currentGoal.definition.getHash() : null,
+      required: hub.currentGoal ? hub.currentGoal.required : null,
+    };
+  }
+
+  /** 立即把当前存档写盘（游戏自动存档默认 60 秒一次，跳关后不落盘，重载页面会退回旧关卡）。 */
+  saveGame() {
+    var root = this.requireRoot();
+    try {
+      if (root.automaticSave && typeof root.automaticSave.doSave === "function") {
+        root.automaticSave.doSave();
+      } else if (root.gameState && typeof root.gameState.doSave === "function") {
+        root.gameState.doSave();
+      } else {
+        return { saved: false, reason: "找不到自动存档入口" };
+      }
+      return { saved: true, level: root.hubGoals ? root.hubGoals.level : null };
+    } catch (error) {
+      return { saved: false, reason: errorPayload(error).message };
+    }
+  }
+
   listBuildings() {
     var variants = shapez.gBuildingVariants || {};
     var result = [];
@@ -878,6 +945,8 @@ class Mod extends shapez.Mod {
     listBuildings: this.listBuildings,
     buildBeltPath: this.buildBeltPath,
     dismissDialogs: this.dismissDialogs,
+    devSkipGoal: this.devSkipGoal,
+    saveGame: this.saveGame,
     queryResources: this.queryResources,
     inspectTile: this.inspectTile,
     queryEntities: this.queryEntities,

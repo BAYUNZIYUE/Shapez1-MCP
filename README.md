@@ -84,6 +84,8 @@ SHAPEZ1_MCP_BRIDGE_ONLY=1        # 只跑 WS 桥、不开 stdio（配合别的 M
 | `shapez_hub_goals` | 等级、当前目标（形状/需求/已交付）、Hub 已存形状、各升级等级与加成 |
 | `shapez_production_rates` | 产出/库存/交付三种数据源下各形状的切片数量 |
 | `shapez_decode_shape` | 形状短码 → 四层四象限（`subShape` 是 `circle`/`rect` 这类全名，`color` 是 `uncolored`/`red`…） |
+| `shapez_save_game` | 立即写盘（自动存档 60 秒一次；跳关/临时改动后不落盘，刷新页面会退回旧关卡） |
+| `shapez_dev_skip_goal` | **仅 dev 构建**：直接完成当前目标进下一关（与游戏内按 `p` 同一条代码路径）；正常游玩不要用 |
 | `shapez_set_speed` | `paused` / `regular` / `fast_forward`（不写存档） |
 | `shapez_wait_ticks` | 按当前速度等待若干 tick（近似，暂停时立即返回） |
 
@@ -188,6 +190,15 @@ SHAPEZ1_MCP_TOKEN=... node scripts/live-check.mjs
   2. 第 2 关 `----CuCu` ×20：miner → 切割机（2x1，南进北出两条）→ 探针读两条带上的形状（`----CuCu`/`CuCu----`）→ 目标那路进 Hub、废料那路进 trash → 交付 20 个升级。
   3. 第 3 关 `RuRuRuRu` ×30：换矿、重新选路 → 交付 30 个升级。
 - 目前停在第 4 关（`RuRu----` ×30，需要「切割 Ru 矿」的产线）。
+
+## 关卡进度（2026-11-14 实测）
+
+- **真实生产打到第 5 关**：第 1 关（`CuCuCuCu` ×10）、第 2 关（切割半形 ×20）、第 3 关（`RuRuRuRu` ×30）、第 4 关（切割 + 选对出料口 ×30）、第 5 关（切割 + 顺时针旋转器 ×75）全部由 MCP 工具自己建线、自己交付。
+- 第 6 关起关卡表换成完整版（26 关）。第 6–24 关的产量要求是 270 / 300 / 480 / … / 25000，且形状是多层 + 染色 + 混合，单个会话内建不出这种产线，所以这几关是用 `shapez_dev_skip_goal`（游戏自带 dev 捷径）推进的，**不是生产交付**。
+- 当前停在第 24 关（`CcRcCcRc:RwCwRwCw:Sr--Sw--:CyCyCyCy` ×25000），已解锁 23 项奖励，含蓝图、电线/逻辑门、滤器、分离器、四切机、显示器。
+
+> demo 关卡表只有 9 关且第 9 关就结束，要打到 24 关必须让 dev 构建用完整关卡表：
+> 在 `src/js/game/modes/levels.js` 的 `generateLevelsForVariant()` 里给 `STANDALONE_LEVELS()` 分支加上 `|| G_IS_DEV`（本地改动，不入库）。
 
 ## 仍未验证
 

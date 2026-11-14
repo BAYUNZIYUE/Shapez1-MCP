@@ -247,6 +247,31 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
       },
     },
     {
+      name: "shapez_dev_skip_goal",
+      description:
+        "仅 dev 构建：直接完成当前关卡目标并进入下一关（与游戏里按 p 键跳过目标同一条代码路径）。正常游玩请用生产交付，不要用它；它不会解锁存档以外的任何东西，也不改存档里的生产数据。",
+      inputSchema: z.object({}),
+      handler: async () => {
+        try {
+          return ok(await call("devSkipGoal"));
+        } catch (error) {
+          return failure("跳过目标", error);
+        }
+      },
+    },
+    {
+      name: "shapez_save_game",
+      description: "立即把当前进度写入存档（游戏自动存档默认 60 秒，跳关或临时改动后不落盘、刷新页面会退回旧关卡）。",
+      inputSchema: z.object({}),
+      handler: async () => {
+        try {
+          return ok(await call("saveGame", {}, 30_000));
+        } catch (error) {
+          return failure("保存存档", error);
+        }
+      },
+    },
+    {
       name: "shapez_hub_goals",
       description: "读取 Hub 升级目标：当前目标进度、已交付数量、各级升级等级、Hub 内已存形状。",
       inputSchema: z.object({}),
