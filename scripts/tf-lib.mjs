@@ -186,3 +186,142 @@ export async function beltToHub({ from, start }) {
   for (const cell of path) state.blocked.add(key(cell.x, cell.y));
   return { path, result: res.value, into };
 }
+
+/** 记录当前哪些格是带子（可穿），哪些是机器（不可穿）。 */
+export async function refreshBeltCells() {
+  state.beltCells = new Set();
+  const entities = (await tool("shapez_query_entities", { limit: 2000 })).value.entities ?? [];
+  for (const e of entities) {
+    if (e.buildingId === "belt") state.beltCells.add(key(e.x, e.y));
+  }
+}
+
+/**
+ * 带隧道插入的铺带：cells 里被别的带子占用的格子，用 sender/receiver 从下面穿过去。
+ *   from   —— cells 之前那一格（矿机/机器）
+ *   cells  —— 规划好的路线（格子序列）
+ *   target —— 最后要接进去的机器格
+ */
+export async function buildRouteWithTunnels({ from, cells, target }) {
+  if (!cells.length) return null;
+  if (!state.beltCells) await refreshBeltCells();
+  const isBelt = (c) => state.beltCells.has(key(c.x, c.y));
+  const isMachine = (c) => state.blocked.has(key(c.x, c.y)) && !isBelt(c);
+
+  const chunks = [];
+  let buf = [];
+  let i = 0;
+  let tunnels = 0;
+  while (i < cells.length) {
+    const c = cells[i];
+    if (isMachine(c)) return { ok: false, reason: `机器格 ${c.x},${c.y}` };
+    if (isBelt(c)) {
+      let j = i;
+      while (j < cells.length && isBelt(cells[j])) j += 1;
+      const run = j - i;
+      if (run > 4 || buf.length === 0 || j >= cells.length) return { ok: false, reason: `穿越段太长 ${run}（${cells[i].x},${cells[i].y}）` };
+      const sender = buf.pop();
+      if (buf.length) chunks.push({ type: "belt", cells: buf });
+      buf = [];
+      chunks.push({ type: "tunnel", sender, receiver: cells[j], run });
+      tunnels += 1;
+      i = j + 1;
+      continue;
+    }
+    buf.push(c);
+    i += 1;
+  }
+  if (buf.length) chunks.push({ type: "belt", cells: buf });
+
+  let prevTile = { x: from.x, y: from.y };
+  for (let idx = 0; idx < chunks.length; idx++) {
+    const chunk = chunks[idx];
+    const next = chunks[idx + 1];
+    if (chunk.type === "tunnel") {
+      const { sender, receiver } = chunk;
+      const dx = receiver.x - sender.x;
+      const dy = receiver.y - sender.y;
+      const rotation = dx > 0 ? 90 : dx < 0 ? 270 : dy > 0 ? 180 : 0;
+      const sres = await tool("shapez_place_building", {
+        buildingId: "underground_belt",
+        x: sender.x,
+        y: sender.y,
+        rotation,
+        rotationVariant: 0,
+      });
+      const rres = await tool("shapez_place_building", {
+        buildingId: "underground_belt",
+        x: receiver.x,
+        y: receiver.y,
+        rotation,
+        rotationVariant: 1,
+      });
+      if (!sres.value?.ok || !rres.value?.ok) return { ok: false, reason: `隧道放不下 ${sender.x},${sender.y}→${receiver.x},${receiver.y}` };
+      state.blocked.add(key(sender.x, sender.y));
+      state.blocked.add(key(receiver.x, receiver.y));
+      prevTile = { x: receiver.x, y: receiver.y };
+      continue;
+    }
+    const nextTarget = next && next.type === "tunnel" ? next.sender : target;
+    const res = await tool("shapez_build_belt_path", {
+      cells: chunk.cells,
+      from: prevTile,
+      target: nextTarget,
+    });
+    if (!res.value || res.value.failed?.length) return { ok: false, reason: `铺带失败 ${JSON.stringify(res.value?.failed?.slice(0, 2))}` };
+    for (const c of chunk.cells) {
+      state.blocked.add(key(c.x, c.y));
+      state.beltCells.add(key(c.x, c.y));
+    }
+    prevTile = chunk.cells[chunk.cells.length - 1];
+  }
+  return { ok: true, tunnels };
+}
+
+/** 带权 BFS：空格 1、已有带子 12（尽量少走，但允许穿）。返回格子序列。 */
+export function findRoute({ from, start, last, target, blockedMachines }) {
+  const startKey = key(start.x, start.y);
+  const goalKey = key(last.x, last.y);
+  const dist = new Map([[startKey, 0]]);
+  const prev = new Map([[startKey, null]]);
+  const net = [key(from.x, from.y)];
+  const visited = new Set(net);
+  const queue = [[0, start.x, start.y]];
+  const isFree = (x, y) => {
+    const k = key(x, y);
+    if (blockedMachines.has(k)) return false;
+    if (state.hubTiles.has(k)) return false;
+    return true;
+  };
+  while (queue.length) {
+    queue.sort((a, b) => a[0] - b[0]);
+    const [cost, cx, cy] = queue.shift();
+    const cur = key(cx, cy);
+    if (visited.has(cur) && cur !== startKey) continue;
+    if (cur === goalKey) {
+      const path = [];
+      let node = cur;
+      while (node) {
+        const [px, py] = node.split(",").map(Number);
+        path.unshift({ x: px, y: py });
+        node = prev.get(node);
+      }
+      return path;
+    }
+    for (const d of DIRS) {
+      const nx = cx + d.dx;
+      const ny = cy + d.dy;
+      const k = key(nx, ny);
+      if (!isFree(nx, ny)) continue;
+      if (state.blocked.has(k) && !(state.beltCells && state.beltCells.has(k))) continue;
+      if (Math.abs(nx - state.hub.x) > 140 || Math.abs(ny - state.hub.y) > 140) continue;
+      const w = state.beltCells && state.beltCells.has(k) ? 12 : 1;
+      const nd = cost + w;
+      if (dist.has(k) && dist.get(k) <= nd) continue;
+      dist.set(k, nd);
+      prev.set(k, cur);
+      queue.push([nd, nx, ny]);
+    }
+  }
+  return null;
+}
