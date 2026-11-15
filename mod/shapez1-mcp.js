@@ -17,7 +17,7 @@
 var METADATA = {
   id: "shapez1-mcp",
   name: "Shapez1 MCP Bridge",
-  version: "0.1.0",
+  version: "0.2.0",
   author: "BAYUNZIYUE",
   description: "把游戏状态通过本地 WebSocket 暴露给 MCP server，供 agent 基座读写游戏",
   website: "https://github.com/BAYUNZIYUE/Shapez1-MCP",
@@ -118,6 +118,95 @@ function errorPayload(error) {
     code: (error && error.code) || "mod_error",
     message: error && error.message ? error.message : String(error),
   };
+}
+
+/**
+ * 把任意游戏对象转成可 JSON 化的普通结构。
+ * 形状体系可能被 mod（如 Twelvefold）改成 12 象限、带接缝等，所以不能假设字段，
+ * 只能按「有 getHash 就报 hash、有 quadrant 数组就展开」这种结构性规则来转。
+ */
+function safeDump(value, depth, seen) {
+  var d = depth || 0;
+  var visited = seen || [];
+  if (value === null || value === undefined) {
+    return value === undefined ? null : value;
+  }
+  var t = typeof value;
+  if (t === "number" || t === "boolean" || t === "string") {
+    return value;
+  }
+  if (t === "function") {
+    return "[function " + (value.name || "anonymous") + "]";
+  }
+  if (t === "symbol" || t === "bigint") {
+    return String(value);
+  }
+  if (visited.length > 40 || visited.indexOf(value) >= 0) {
+    return "[circular]";
+  }
+  if (d > 5) {
+    return "[depth]";
+  }
+  var next = visited.concat([value]);
+  if (Array.isArray(value)) {
+    return value.slice(0, 12).map(function (entry) {
+      return safeDump(entry, d + 1, next);
+    });
+  }
+  if (value instanceof Map) {
+    var mapOut = {};
+    var mapCount = 0;
+    value.forEach(function (v, k) {
+      if (mapCount++ < 20) mapOut[String(k)] = safeDump(v, d + 1, next);
+    });
+    return { __map: mapOut };
+  }
+  if (value instanceof Set) {
+    return { __set: Array.from(value).slice(0, 12).map(function (entry) {
+      return safeDump(entry, d + 1, next);
+    }) };
+  }
+  var out = {};
+  try {
+    if (typeof value.getHash === "function") {
+      out.__shape = String(value.getHash());
+    }
+  } catch (error) {
+    /* 不是形状 */
+  }
+  try {
+    if (value.definition && typeof value.definition.getHash === "function") {
+      out.__definition = String(value.definition.getHash());
+    }
+  } catch (error) {
+    /* 不是物品 */
+  }
+  try {
+    if (value.constructor && value.constructor.name) {
+      out.__type = value.constructor.name;
+    }
+  } catch (error) {
+    /* 忽略 */
+  }
+  var keys = [];
+  try {
+    keys = Object.keys(value);
+  } catch (error) {
+    keys = [];
+  }
+  for (var i = 0; i < keys.length && i < 40; i++) {
+    var key = keys[i];
+    if (out[key] !== undefined) continue;
+    var field;
+    try {
+      field = value[key];
+    } catch (error) {
+      continue;
+    }
+    if (typeof field === "function") continue;
+    out[key] = safeDump(field, d + 1, next);
+  }
+  return out;
 }
 
 class Mod extends shapez.Mod {
@@ -465,20 +554,83 @@ class Mod extends shapez.Mod {
       return { valid: false, reason: errorPayload(error).message };
     }
     var layers = [];
+    var quadrantCount = null;
     for (var layerIndex = 0; layerIndex < definition.layers.length; layerIndex++) {
       var layer = definition.layers[layerIndex];
+      // 原版每层是 4 象限数组；Twelvefold 这类 mod 会改成 12 象限（或更多），
+      // 所以象限数从数据本身读，不能写死 4。
+      var source = layer && layer.quadrants ? layer.quadrants : layer;
+      var count = source && typeof source.length === "number" ? source.length : 4;
+      if (quadrantCount === null) {
+        quadrantCount = count;
+      }
       var quadrants = [];
-      for (var quadrant = 0; quadrant < 4; quadrant++) {
-        var subShape = layer && layer[quadrant];
-        quadrants.push(
-          subShape
-            ? { subShape: String(subShape.subShape), color: String(subShape.color) }
-            : null,
-        );
+      for (var quadrant = 0; quadrant < count; quadrant++) {
+        var subShape = source && source[quadrant];
+        if (!subShape) {
+          quadrants.push(null);
+          continue;
+        }
+        var entry = {
+          subShape: String(subShape.subShape),
+          color: String(subShape.color),
+        };
+        // 额外字段（接缝/边界等）原样带出来，方便判断 mod 的形状语义
+        try {
+          var extraKeys = Object.keys(subShape);
+          for (var extra = 0; extra < extraKeys.length && extra < 10; extra++) {
+            var extraKey = extraKeys[extra];
+            if (extraKey === "subShape" || extraKey === "color") continue;
+            var extraValue = subShape[extraKey];
+            if (typeof extraValue === "function" || extraValue === undefined) continue;
+            entry[extraKey] = safeDump(extraValue, 3, []);
+          }
+        } catch (error) {
+          /* 额外字段读不到就跳过 */
+        }
+        quadrants.push(entry);
       }
       layers.push(quadrants);
     }
-    return { valid: true, key: key, hash: definition.getHash(), layers: layers };
+    return {
+      valid: true,
+      key: key,
+      hash: definition.getHash(),
+      quadrantCount: quadrantCount,
+      layerCount: definition.layers.length,
+      layers: layers,
+    };
+  }
+
+  /**
+   * 在游戏上下文里执行一小段 JS —— 只给只读上下文（shapez/root/hub/map/params/dump），
+   * 用来适配被其它 mod 改过的形状/建筑体系：查建筑定义、读机器内部状态、试算法。
+   * 不提供 window/fetch/require，返回值统一走 safeDump。
+   */
+  evalCode(params) {
+    var code = params.code;
+    if (typeof code !== "string" || !code.trim()) {
+      return { ok: false, reason: "code 必须是非空字符串" };
+    }
+    var root = this.requireRoot();
+    var fn;
+    try {
+      fn = new Function("shapez", "root", "hub", "map", "params", "dump", code);
+    } catch (error) {
+      return { ok: false, reason: "代码语法错误: " + errorPayload(error).message };
+    }
+    var started = Date.now();
+    var value;
+    try {
+      value = fn(shapez, root, root.hubGoals, root.map, params, safeDump);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: errorPayload(error).message,
+        stack: String((error && error.stack) || "").split("\n").slice(0, 6).join("\n"),
+      };
+    }
+    return { ok: true, elapsedMs: Date.now() - started, value: safeDump(value, 0, []) };
   }
 
   queryResources(params) {
@@ -953,6 +1105,7 @@ class Mod extends shapez.Mod {
     hubGoals: this.hubGoals,
     productionRates: this.productionRates,
     decodeShape: this.decodeShape,
+    evalCode: this.evalCode,
     placeBuilding: this.placeBuilding,
     placeBuildings: this.placeBuildings,
     deleteBuilding: this.deleteBuilding,

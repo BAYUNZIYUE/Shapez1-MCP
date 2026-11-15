@@ -298,7 +298,7 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
     {
       name: "shapez_decode_shape",
       description:
-        "把游戏的形状短码（如 CuCuCuCu、RuRu----:CuCu----）解析成四层结构：每层 4 个象限，每象限给出 subShape 与 color，空位为 null。",
+        "把形状短码解析成结构：每层给出全部象限（原版 4 个，装了十二分形一类 mod 时可能是 12 个，以 quadrantCount 为准），每象限给出 subShape、color 与额外字段（如接缝），空位为 null。",
       inputSchema: z.object({
         key: z.string().min(1).describe("形状短码，大小写敏感"),
       }),
@@ -307,6 +307,25 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
           return ok(await call("decodeShape", args));
         } catch (error) {
           return failure("解析形状", error);
+        }
+      },
+    },
+    {
+      name: "shapez_eval",
+      description:
+        "在游戏上下文里执行一小段 JS（诊断/适配用）：可用 shapez、root、hub、map、params、dump(v)；返回 dump 后的值。不提供 window/fetch/require。用于查建筑定义、读机器内部状态、确认其它 mod 改过的形状语义。",
+      inputSchema: z.object({
+        code: z
+          .string()
+          .min(1)
+          .describe("函数体源码，例如 \"return root.hubGoals.level\" 或 \"return Object.keys(shapez)\"；用 return 交出结果"),
+        params: z.record(z.string(), z.unknown()).optional().describe("传给代码的 params 对象"),
+      }),
+      handler: async (args) => {
+        try {
+          return ok(await call("evalCode", args, 30_000));
+        } catch (error) {
+          return failure("执行代码", error);
         }
       },
     },

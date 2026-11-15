@@ -100,3 +100,31 @@ SHAPEZ1_MCP_HOST=0.0.0.0 SHAPEZ1_MCP_TOKEN=<与 mod 一致> node scripts/live-ch
 - 关卡弹窗（“第 N 关完成 / 下一关”）会**暂停模拟**：这时所有 miner/传送带都不动，`shapez_status` 仍显示 `paused:false`。自动玩之前必须先把弹窗点掉（人或 browse 驱动）。
 - 与其他 mod 共存已验证（官方示例 base + add_building_basic：60 个变体、新建筑能放能删），但**替换了 `tryPlaceBuilding` 的 mod（多人同步类）未验证**——本 mod 直接调底层 API 会绕过对方。
 - 不支持 shapez Community Edition 的 `.asar` + `mod.json` mod 格式。
+
+## Twelvefold（十二分形）适配笔记（2026-11-15 实测）
+
+用户的 Steam 客户端里装了 `Twelvefold_0.6.5.js`，形状体系被整体改造：
+
+- 形状 = 12 个象限（24 位短码），每象限有 `subShape`（tfE/tfN/tfD/tfA 四种片型）、`color`、以及 `seam`（接缝）标记。`E`/`e` 的区别就是同一片型的接缝有无。
+- 关卡表来自 mod 自己（8 关），不是原版 26 关：
+  1 `eu`×12(30) → 2 `EueueueuEueueueuEueueueu`(60) → 3 `EbeueuecEceueuewEweueueb`(120) → 4 `aueudueuaueudueuaueudueu`(200) → 5 `Ararauau...`(400) → 6 `Nbepeu...`(700) → 7 `Npapar...`(1000) → 8 回到 `eu`×12(100)
+- 机器语义（用「测量仪」直接塞 inputs 读 outputs 验证）：
+  - `tf_machine_seamCut`：在顶部主轴切一道缝（缝落在 index 0）
+  - `tf_machine_seamErase`：消掉顶部那道缝
+  - `tf_machine_rotate`/`rotateN`：整体旋转 30°×N（`rotate4` = 120°，缝 0→4）
+  - `tf_machine_seepPaint`：**给每条接缝两侧、还没染色的那两片上色**；已经染过的缝会被跳过，全部染过时 `canProcess=false`（会堵）
+  - `tf_machine_trimLeft/trimRight`、`templateCut/templateErase`（需要模板信号）
+- 端口（实测，tile 就是「物料来自/去向的那一格」）：
+  - seamCut/rotate4 rot0：进 (x,y+1)，出 (x,y-1)；rot90 进 (x-1,y) 出 (x+1,y)；rot180 进 (x,y-1) 出 (x,y+1)
+  - seepPaint(2x1) rot0：占 (x,y),(x+1,y)；进 (x-1,y)；染料 (x+1,y-1)；出 (x+2,y)
+  - seepPaint rot270：占 (x,y),(x,y-1)；进 (x,y+1)；染料 (x-1,y-1)；出 (x,y-2)
+  - mixer(2x1) rot0：进 (x,y+1),(x+1,y+1)；出 (x,y-1)。rot90：占 (x,y),(x,y+1)，进 (x-1,y),(x-1,y+1)，出 (x+1,y)。rot180：占 (x,y),(x-1,y)，进 (x,y-1),(x-1,y-1)，出 (x,y+1)
+- 染料只有红/绿/蓝三种矿；青=绿+蓝、白=红+绿+蓝，必须用原版 `mixer` 合成。
+- 关卡 3 已验证的配方（顺序不能换）：切缝 → 渗染(白) → 转120° → 切缝 → 渗染(青) → 转120° → 切缝 → 渗染(蓝)，末级正好得到目标 hash。
+
+### 工具/实现上的坑
+
+- `safeDump` 把数组截到 **12 项**：`shapez_eval` 里一次想返回几十上百个坐标会被静默截断（排查了很久）。下次改 mod 时把它放大。
+- 布线的真正难点不是机器语义，是**染料长距离布线**：BFS 逐条铺带会互相封死。已试过：垂直主流+西侧染料口（染料在东侧，跨线不可能）、水平主流+上方竖列（可行方向）。用 `shapez_build_belt_path` 的 `failed` 字段判断是否真铺上，别只看 `requested/placed`。
+- `tf_logistics_*`（超链接、交叉带）在关卡 3 还没解锁，放不下去。
+- 结果导向：判断「铺上了」要读实际 tile 或看 `failed` 数组，不能只看返回值存在与否。
