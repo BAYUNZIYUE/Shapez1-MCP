@@ -77,7 +77,7 @@ function loadMod(options: { hostname?: string; token?: string } = {}): {
 }
 
 describe("游戏内 mod（假环境求值）", () => {
-  it("能在假 shapez 环境里加载，并注册 10 个方法", async () => {
+  it("能在假 shapez 环境里加载，并注册全部方法", async () => {
     const { create } = loadMod();
     const mod = create();
     expect(Object.keys(mod.methods)).toEqual([
@@ -93,6 +93,8 @@ describe("游戏内 mod（假环境求值）", () => {
       "hubGoals",
       "productionRates",
       "decodeShape",
+      "findResource",
+      "ports",
       "evalCode",
       "placeBuilding",
       "placeBuildings",
@@ -126,6 +128,6 @@ describe("游戏内 mod（假环境求值）", () => {
     const { create } = loadMod();
     const mod = create();
     mod.init();
-    expect(mod.status()).toMatchObject({ hasSave: false, modVersion: "0.1.0" });
+    expect(mod.status()).toMatchObject({ hasSave: false, modVersion: "0.3.0" });
   });
 });

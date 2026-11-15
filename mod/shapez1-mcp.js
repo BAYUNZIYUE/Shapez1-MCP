@@ -17,7 +17,7 @@
 var METADATA = {
   id: "shapez1-mcp",
   name: "Shapez1 MCP Bridge",
-  version: "0.2.0",
+  version: "0.3.0",
   author: "BAYUNZIYUE",
   description: "把游戏状态通过本地 WebSocket 暴露给 MCP server，供 agent 基座读写游戏",
   website: "https://github.com/BAYUNZIYUE/Shapez1-MCP",
@@ -149,7 +149,7 @@ function safeDump(value, depth, seen) {
   }
   var next = visited.concat([value]);
   if (Array.isArray(value)) {
-    return value.slice(0, 12).map(function (entry) {
+    return value.slice(0, 300).map(function (entry) {
       return safeDump(entry, d + 1, next);
     });
   }
@@ -157,12 +157,12 @@ function safeDump(value, depth, seen) {
     var mapOut = {};
     var mapCount = 0;
     value.forEach(function (v, k) {
-      if (mapCount++ < 20) mapOut[String(k)] = safeDump(v, d + 1, next);
+      if (mapCount++ < 100) mapOut[String(k)] = safeDump(v, d + 1, next);
     });
     return { __map: mapOut };
   }
   if (value instanceof Set) {
-    return { __set: Array.from(value).slice(0, 12).map(function (entry) {
+    return { __set: Array.from(value).slice(0, 100).map(function (entry) {
       return safeDump(entry, d + 1, next);
     }) };
   }
@@ -194,7 +194,7 @@ function safeDump(value, depth, seen) {
   } catch (error) {
     keys = [];
   }
-  for (var i = 0; i < keys.length && i < 40; i++) {
+  for (var i = 0; i < keys.length && i < 60; i++) {
     var key = keys[i];
     if (out[key] !== undefined) continue;
     var field;
@@ -877,6 +877,142 @@ class Mod extends shapez.Mod {
     }
   }
 
+  /**
+   * 按颜色或形状就近找地图上的资源格（避开「扫描全图再截断」的坑）。
+   *   { color?: "blue"|"red"|..., shape?: "短码", x, y, radius?, limit? }
+   */
+  findResource(params) {
+    var root = this.requireRoot();
+    var cx = params.x === undefined ? 0 : Number(params.x);
+    var cy = params.y === undefined ? 0 : Number(params.y);
+    var radius = params.radius === undefined ? 40 : Math.max(1, Math.min(200, Number(params.radius)));
+    var limit = params.limit === undefined ? 20 : Math.max(1, Math.min(300, Number(params.limit)));
+    var wantColor = params.color || null;
+    var wantShape = params.shape || null;
+    if (!wantColor && !wantShape) {
+      throw new Error("color 和 shape 至少给一个");
+    }
+    var found = [];
+    for (var x = cx - radius; x <= cx + radius; x++) {
+      for (var y = cy - radius; y <= cy + radius; y++) {
+        var item = null;
+        try {
+          item = root.map.getLowerLayerContentXY(x, y);
+        } catch (error) {
+          item = null;
+        }
+        if (!item) {
+          continue;
+        }
+        var type = itemType(item);
+        if (wantColor) {
+          if (type !== "ColorItem" || String(item.color) !== wantColor) {
+            continue;
+          }
+        }
+        var hash = itemKey(item);
+        if (wantShape && hash !== wantShape) {
+          continue;
+        }
+        found.push({
+          x: x,
+          y: y,
+          type: type,
+          shape: hash,
+          color: item.color === undefined ? null : String(item.color),
+          distance: Math.abs(x - cx) + Math.abs(y - cy),
+        });
+      }
+    }
+    found.sort(function (a, b) {
+      return a.distance - b.distance;
+    });
+    return { matched: found.length, returned: Math.min(found.length, limit), tiles: found.slice(0, limit) };
+  }
+
+  /**
+   * 读某座建筑的真实端口（世界坐标）：物料从哪一格进、从哪一格出。
+   * 参数 { x, y } 或 { uid }。十二分形这类 mod 的建筑端口不能靠猜，靠这个。
+   */
+  ports(params) {
+    var root = this.requireRoot();
+    var target = null;
+    var all = this.collectEntities();
+    for (var i = 0; i < all.length; i++) {
+      var entity = all[i];
+      if (!entity || !entity.components || !entity.components.StaticMapEntity) continue;
+      if (params.uid !== undefined && entity.uid === params.uid) {
+        target = entity;
+        break;
+      }
+      if (params.x !== undefined && params.y !== undefined) {
+        var staticComp = entity.components.StaticMapEntity;
+        var origin = staticComp.getTileSpaceBounds ? staticComp.getTileSpaceBounds() : null;
+        if (
+          origin &&
+          params.x >= origin.x &&
+          params.x < origin.x + origin.w &&
+          params.y >= origin.y &&
+          params.y < origin.y + origin.h
+        ) {
+          target = entity;
+          break;
+        }
+      }
+    }
+    if (!target) {
+      return { found: false, reason: "该格没有建筑" };
+    }
+    var sm = target.components.StaticMapEntity;
+    var vecOf = shapez.enumDirectionToVector;
+    var dirName = function (vec) {
+      var name = null;
+      Object.keys(vecOf).forEach(function (k) {
+        if (vecOf[k].x === vec.x && vecOf[k].y === vec.y) name = k;
+      });
+      return name;
+    };
+    var world = function (pos, dir) {
+      var lp = sm.applyRotationToVector(pos);
+      var ld = sm.applyRotationToVector(vecOf[dir]);
+      return {
+        tile: { x: sm.origin.x + lp.x + ld.x, y: sm.origin.y + lp.y + ld.y },
+        dir: dirName(ld),
+      };
+    };
+    var bounds = sm.getTileSpaceBounds ? sm.getTileSpaceBounds() : null;
+    var result = {
+      found: true,
+      uid: target.uid,
+      buildingId: null,
+      rotation: sm.rotation,
+      rotationVariant: sm.getRotationVariant ? sm.getRotationVariant() : null,
+      bounds: bounds ? { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h } : null,
+      inputs: [],
+      outputs: [],
+    };
+    try {
+      result.buildingId = sm.getMetaBuilding().getId();
+    } catch (error) {
+      result.buildingId = null;
+    }
+    var acceptor = target.components.ItemAcceptor;
+    if (acceptor && acceptor.slots) {
+      result.inputs = acceptor.slots.map(function (slot) {
+        var pos = world(slot.pos, slot.direction);
+        return { tile: pos.tile, dir: pos.dir, filter: slot.filter || "any" };
+      });
+    }
+    var ejector = target.components.ItemEjector;
+    if (ejector && ejector.slots) {
+      result.outputs = ejector.slots.map(function (slot) {
+        var pos = world(slot.pos, slot.direction);
+        return { tile: pos.tile, dir: pos.dir };
+      });
+    }
+    return result;
+  }
+
   listBuildings() {
     var variants = shapez.gBuildingVariants || {};
     var result = [];
@@ -1105,6 +1241,8 @@ class Mod extends shapez.Mod {
     hubGoals: this.hubGoals,
     productionRates: this.productionRates,
     decodeShape: this.decodeShape,
+    findResource: this.findResource,
+    ports: this.ports,
     evalCode: this.evalCode,
     placeBuilding: this.placeBuilding,
     placeBuildings: this.placeBuildings,

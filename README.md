@@ -84,6 +84,9 @@ SHAPEZ1_MCP_BRIDGE_ONLY=1        # 只跑 WS 桥、不开 stdio（配合别的 M
 | `shapez_hub_goals` | 等级、当前目标（形状/需求/已交付）、Hub 已存形状、各升级等级与加成 |
 | `shapez_production_rates` | 产出/库存/交付三种数据源下各形状的切片数量 |
 | `shapez_decode_shape` | 形状短码 → 四层四象限（`subShape` 是 `circle`/`rect` 这类全名，`color` 是 `uncolored`/`red`…） |
+| `shapez_find_resource` | 按颜色/形状就近找资源格（距离排序，返回前 N 个） |
+| `shapez_ports` | 读建筑真实端口：物料从哪格进、哪格出（世界坐标 + 方向） |
+| `shapez_eval` | 在游戏上下文跑一小段 JS（诊断/适配用，只给 shapez/root/hub/map/dump） |
 | `shapez_save_game` | 立即写盘（自动存档 60 秒一次；跳关/临时改动后不落盘，刷新页面会退回旧关卡） |
 | `shapez_dev_skip_goal` | **仅 dev 构建**：直接完成当前目标进下一关（与游戏内按 `p` 同一条代码路径）；正常游玩不要用 |
 | `shapez_set_speed` | `paused` / `regular` / `fast_forward`（不写存档） |

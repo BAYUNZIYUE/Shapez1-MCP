@@ -108,7 +108,7 @@ describe("MCP stdio 端到端", () => {
     await waitFor(() => find(2) !== undefined);
 
     const tools = find(2)?.result?.tools ?? [];
-    expect(tools).toHaveLength(18);
+    expect(tools).toHaveLength(20);
     expect(tools.map((tool) => tool.name)).toContain("shapez_place_buildings");
 
     send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "shapez_status", arguments: {} } });

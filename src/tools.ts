@@ -330,6 +330,43 @@ export function buildTools(deps: ToolDeps): ToolSpec[] {
       },
     },
     {
+      name: "shapez_find_resource",
+      description:
+        "按颜色或形状就近找地图资源格（返回距离排序的前 limit 个）。比 query_resources 扫描全图更稳，不受返回体积限制。",
+      inputSchema: z.object({
+        x: z.number().describe("扫描中心 x"),
+        y: z.number().describe("扫描中心 y"),
+        color: z.string().optional().describe("颜色名：red/green/blue/yellow/purple/cyan/white"),
+        shape: z.string().optional().describe("形状短码，例如 CuCu----"),
+        radius: z.number().int().min(1).max(200).default(40),
+        limit: z.number().int().min(1).max(300).default(20),
+      }),
+      handler: async (args) => {
+        try {
+          return ok(await call("findResource", args, 60_000));
+        } catch (error) {
+          return failure("找资源", error);
+        }
+      },
+    },
+    {
+      name: "shapez_ports",
+      description:
+        "读某座建筑的真实端口：物料从哪一格进、哪一格出（世界坐标 + 方向）。装 mod（如十二分形）后建筑端口不能靠猜，用这个确认。",
+      inputSchema: z.object({
+        x: z.number().optional().describe("建筑所在格 x（任一格）"),
+        y: z.number().optional().describe("建筑所在格 y"),
+        uid: z.number().int().optional().describe("也可以直接给实体 uid"),
+      }),
+      handler: async (args) => {
+        try {
+          return ok(await call("ports", args));
+        } catch (error) {
+          return failure("读端口", error);
+        }
+      },
+    },
+    {
       name: "shapez_set_speed",
       description: "设置游戏速度：paused 暂停、regular 正常、fast_forward 快进。仅当前会话有效，不写入存档。",
       inputSchema: z.object({
