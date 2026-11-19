@@ -6,7 +6,7 @@
  *   seepPaint(2x1, rot 270)：进 (x, y+1)，出 (x, y-2)，染料从 (x-1, y-1) 进
  *   mixer(2x1, rot 0)：两路染料从 (x, y+1)、(x+1, y+1) 进，出 (x, y-1)
  */
-import { tool, key } from "<local-tmp>/mcpc.mjs";
+import { tool, key } from "./lib/mcpc.mjs";
 
 export const DIRS = [
   { dx: 0, dy: -1, rotation: 0, name: "上" },

@@ -2,13 +2,13 @@
  * 十二分形（Twelvefold）通用产线：矿石 → 一串 1x1 机器 → Hub。
  *
  *   TF_SEQ="tf_machine_seamCut,tf_machine_rotate4,tf_machine_seamCut,tf_machine_rotate4,tf_machine_seamCut" \
- *   node <local-tmp>/tf-sequence.mjs [--cleanup] [--skip N] [--dry]
+ *   node ./tf-sequence.mjs [--cleanup] [--skip N] [--dry]
  *
  * 布局（一列向上，全部用 MCP 工具铺）：
  *   miner → belt → 机器① → belt → 机器② → … → belt → BFS 到 Hub
  * 脚本会逐级读传送带上的形状，验证每个环节到底做了什么，再决定接不接 Hub。
  */
-import { tool, sleep, key } from "<local-tmp>/mcpc.mjs";
+import { tool, sleep, key } from "./lib/mcpc.mjs";
 
 const seq = (process.env.TF_SEQ ?? "")
   .split(",")

@@ -128,3 +128,9 @@ SHAPEZ1_MCP_HOST=0.0.0.0 SHAPEZ1_MCP_TOKEN=<与 mod 一致> node scripts/live-ch
 - 布线的真正难点不是机器语义，是**染料长距离布线**：BFS 逐条铺带会互相封死。已试过：垂直主流+西侧染料口（染料在东侧，跨线不可能）、水平主流+上方竖列（可行方向）。用 `shapez_build_belt_path` 的 `failed` 字段判断是否真铺上，别只看 `requested/placed`。
 - `tf_logistics_*`（超链接、交叉带）在关卡 3 还没解锁，放不下去。
 - 结果导向：判断「铺上了」要读实际 tile 或看 `failed` 数组，不能只看返回值存在与否。
+
+## 脱敏（重要）
+
+- `artifacts/` 里是**带内网地址和桥 token** 的交付文件，已在 `.gitignore` 里，任何情况下不要提交。
+- 文档、脚本、测试里不写内网 IP（`203.0.113.*`）与绝对路径；需要示例时用 `203.0.113.x` 这类文档保留地址，路径用 `<仓库绝对路径>` 占位。
+- 桥 token 只放在 `<local-tmp>/shapez-bridge-token.txt`（同样不入库），需要时用环境变量注入，不要打印或写进文件。

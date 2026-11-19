@@ -1,257 +1,370 @@
 /**
- * 十二分形 第 3 关：三色分段环 `EbeueuecEceueuewEweueueb` ×120
- *
- * 配方（每步都用机器实测确认过）：
- *   矿(无接缝) → 切缝 → 渗染(白) → 转120° → 切缝 → 渗染(青) → 转120° → 切缝 → 渗染(蓝) → Hub
- * 渗染机只给「每条接缝两侧、还没染色的两片」上色，所以顺序必须是 白→青→蓝。
- * 染料：白 = (绿+蓝=青) + 红；青 = 绿+蓝；蓝直接用。
- *
- *   node scripts/tf-level3.mjs [--dry] [--probe-only]
+ * 第 3 关 v10：路线全部由「直线段」组成（竖→横→竖），跨到别人的带子就插隧道。
+ * 直线段简单可控，不再用通用 BFS 铺带，避免上次那种“缺一格”的问题。
  */
 import * as L from "./tf-lib.mjs";
 
-const DRY = process.argv.includes("--dry");
 const ORE = "eueueueueueueueueueueueu";
-const GOAL = "EbeueuecEceueuewEweueueb";
 
 await L.init();
 const g = await L.goals();
 console.log(`关卡 ${g.level}/${g.levelCount}，目标 ${g.goalShape} ×${g.required}`);
 
-// 主产线要竖着放，矿机必须落在矿格上，且上方 26 格空着
+{
+  const all = (await L.tool("shapez_query_entities", { limit: 2000 })).value.entities;
+  let removed = 0;
+  for (const e of all) {
+    if (e.buildingId === "hub") continue;
+    await L.tool("shapez_delete_building", { x: e.x, y: e.y });
+    removed += 1;
+  }
+  console.log(`清场 ${removed} 个`);
+  await L.refreshBlocked();
+  await L.refreshBeltCells();
+}
+
 const resources = (await L.tool("shapez_query_resources", {
   x: L.state.hub.x,
   y: L.state.hub.y,
-  radius: 70,
+  radius: 95,
   limit: 5000,
 })).value;
 const oreTiles = (resources.tiles ?? []).filter((t) => t.shape === ORE);
-if (!oreTiles.length) {
-  console.log("附近没有矿石");
-  process.exit(1);
-}
-const height = 26;
-const candidates = oreTiles
-  .map((t) => ({ ...t, score: Math.abs(t.x - 14) + Math.abs(t.y - L.state.hub.y) }))
-  .sort((a, b) => a.score - b.score);
-let site = null;
-for (const tile of candidates.slice(0, 60)) {
+const cands = oreTiles.map((t) => ({ ...t, d: Math.abs(t.x - 5) + Math.abs(t.y) })).sort((a, b) => a.d - b.d);
+let start = null;
+for (const t of cands.slice(0, 150)) {
   let ok = true;
-  for (let i = 1; i <= height; i++) {
-    if (!L.free(tile.x, tile.y - i)) {
-      ok = false;
-      break;
-    }
-  }
-  if (ok) {
-    site = tile;
-    break;
-  }
+  for (let i = 1; i <= 22 && ok; i++) if (!L.free(t.x - i, t.y)) ok = false;
+  if (ok) { start = t; break; }
 }
-if (!site) {
-  console.log("找不到上方 26 格空的矿格");
-  process.exit(1);
-}
-const C = site.x;
-const y0 = site.y;
-console.log(`主产线列 x=${C}，矿机 y=${y0}（矿格 ${site.x},${site.y}）`);
+if (!start) throw new Error("找不到合适矿格");
+const x0 = start.x;
+const R = start.y;
+console.log(`矿机 (${x0},${R})，产线向西`);
 
-// 主产线：从 (C,y0) 往上；height 决定机器占几格（渗染机 2 格）
-const machines = [
-  { kind: "miner", y: y0, height: 1 },
-  { kind: "tf_machine_seamCut", y: y0 - 2, height: 1 },
-  { kind: "tf_machine_seepPaint", y: y0 - 4, height: 2, dye: "white" },
-  { kind: "tf_machine_rotate4", y: y0 - 7, height: 1 },
-  { kind: "tf_machine_seamCut", y: y0 - 9, height: 1 },
-  { kind: "tf_machine_seepPaint", y: y0 - 11, height: 2, dye: "cyan" },
-  { kind: "tf_machine_rotate4", y: y0 - 14, height: 1 },
-  { kind: "tf_machine_seamCut", y: y0 - 16, height: 1 },
-  { kind: "tf_machine_seepPaint", y: y0 - 18, height: 2, dye: "blue" },
+const seq = [
+  { kind: "miner", x: x0, w: 1, rotation: 270 },
+  { kind: "tf_machine_seamCut", x: x0 - 2, w: 1, rotation: 270 },
+  { kind: "tf_machine_seepPaint", x: x0 - 4, w: 2, rotation: 180 },
+  { kind: "tf_machine_rotate4", x: x0 - 7, w: 1, rotation: 270 },
+  { kind: "tf_machine_seamCut", x: x0 - 9, w: 1, rotation: 270 },
+  { kind: "tf_machine_seepPaint", x: x0 - 11, w: 2, rotation: 180 },
+  { kind: "tf_machine_rotate4", x: x0 - 14, w: 1, rotation: 270 },
+  { kind: "tf_machine_seamCut", x: x0 - 16, w: 1, rotation: 270 },
+  { kind: "tf_machine_seepPaint", x: x0 - 18, w: 2, rotation: 180 },
 ];
-
-if (DRY) {
-  for (const m of machines) console.log("  ", m.kind, `x=${C} y=${m.y}`);
-  process.exit(0);
-}
-
-for (const m of machines) {
-  await L.place(m.kind, C, m.y, m.kind === "tf_machine_seepPaint" ? 270 : 0);
-}
-console.log("主产线机器已放");
-
-// 机器之间的单格带（都朝上）
-for (let i = 0; i < machines.length - 1; i++) {
-  const prev = machines[i];
-  const next = machines[i + 1];
-  const cell = { x: C, y: next.y + 1 };
+for (const m of seq) await L.place(m.kind, m.x, R, m.rotation);
+for (let i = 0; i < seq.length - 1; i++) {
+  const cell = { x: seq[i + 1].x + 1, y: R };
   const res = await L.beltPath({
-    from: { x: C, y: prev.y },
+    from: { x: seq[i].x - seq[i].w, y: R },
     start: cell,
     last: cell,
-    target: { x: C, y: next.y },
+    target: { x: seq[i + 1].x, y: R },
   });
-  if (!res) throw new Error(`第 ${i} 段带铺不了`);
+  if (!res || res.failed) throw new Error(`主流第 ${i} 段没铺上`);
 }
-console.log("主产线传送带已铺");
+console.log("主流已铺");
 
-// 3) 三种染料
-const dyePorts = {
-  white: { last: { x: C - 1, y: y0 - 5 }, target: { x: C, y: y0 - 5 } },
-  cyan: { last: { x: C - 1, y: y0 - 12 }, target: { x: C, y: y0 - 12 } },
-  blue: { last: { x: C - 1, y: y0 - 19 }, target: { x: C, y: y0 - 19 } },
+const colW = x0 - 5;
+const colC = x0 - 12;
+const colB = x0 - 19;
+await L.place("mixer", colW, R + 4, 0);
+await L.place("mixer", colW, R + 8, 0);
+await L.place("mixer", colC, R + 4, 0);
+
+const verticalUp = async (col, fromRow, toRow, targetRow, label) => {
+  const cells = [];
+  for (let y = fromRow - 1; y >= toRow; y--) cells.push({ x: col, y });
+  const res = await L.tool("shapez_build_belt_path", {
+    cells,
+    from: { x: col, y: fromRow },
+    target: { x: col, y: targetRow },
+  });
+  if (!res.value || res.value.failed?.length) throw new Error(`${label} 失败`);
+  for (const c of cells) {
+    L.state.blocked.add(L.key(c.x, c.y));
+    L.state.beltCells.add(L.key(c.x, c.y));
+  }
+  console.log(`${label}: ${cells.length} 格`);
+};
+await verticalUp(colW, R + 8, R + 5, R + 4, "青2→白");
+await verticalUp(colW, R + 4, R + 1, R, "白→paint1");
+await verticalUp(colC, R + 4, R + 1, R, "青→paint2");
+
+/**
+ * 铺一条直线段：从 from 的下一格开始，按 dx/dy 走到 end（含）。
+ * 遇到别人的带子就插隧道（sender 前一格、receiver 后一格）。
+ */
+const buildStraight = async ({ from, end, target, label }) => {
+  const stepX = Math.sign(end.x - from.x);
+  const stepY = Math.sign(end.y - from.y);
+  const cells = [];
+  let cur = { x: from.x + stepX, y: from.y + stepY };
+  while (true) {
+    cells.push({ x: cur.x, y: cur.y });
+    if (cur.x === end.x && cur.y === end.y) break;
+    cur = { x: cur.x + stepX, y: cur.y + stepY };
+  }
+  // 切分成「普通段 / 隧道段」
+  const chunks = [];
+  let buf = [];
+  let i = 0;
+  let tunnels = 0;
+  while (i < cells.length) {
+    const c = cells[i];
+    const k = L.key(c.x, c.y);
+    const belt = L.state.beltCells.has(k);
+    const machine = L.state.blocked.has(k) && !belt;
+    if (machine) return { ok: false, reason: `机器挡路 ${c.x},${c.y}` };
+    if (belt) {
+      let j = i;
+      while (j < cells.length && L.state.beltCells.has(L.key(cells[j].x, cells[j].y))) j++;
+      const run = j - i;
+      if (run > 4 || buf.length === 0 || j >= cells.length) return { ok: false, reason: `穿越段 ${run} 无法处理` };
+      const sender = buf.pop();
+      if (buf.length) chunks.push({ belt: buf });
+      buf = [];
+      chunks.push({ tunnel: { sender, receiver: cells[j], run } });
+      tunnels += 1;
+      i = j + 1;
+      continue;
+    }
+    buf.push(c);
+    i += 1;
+  }
+  if (buf.length) chunks.push({ belt: buf });
+
+  let prev = { x: from.x, y: from.y };
+  for (let idx = 0; idx < chunks.length; idx++) {
+    const chunk = chunks[idx];
+    const next = chunks[idx + 1];
+    if (chunk.tunnel) {
+      const { sender, receiver } = chunk.tunnel;
+      const dx = receiver.x - sender.x;
+      const dy = receiver.y - sender.y;
+      const rotation = dx > 0 ? 90 : dx < 0 ? 270 : dy > 0 ? 180 : 0;
+      const sres = await L.tool("shapez_place_building", {
+        buildingId: "underground_belt",
+        x: sender.x,
+        y: sender.y,
+        rotation,
+        rotationVariant: 0,
+      });
+      const rres = await L.tool("shapez_place_building", {
+        buildingId: "underground_belt",
+        x: receiver.x,
+        y: receiver.y,
+        rotation,
+        rotationVariant: 1,
+      });
+      if (!sres.value?.ok || !rres.value?.ok) return { ok: false, reason: `隧道放不下 ${sender.x},${sender.y}` };
+      L.state.blocked.add(L.key(sender.x, sender.y));
+      L.state.blocked.add(L.key(receiver.x, receiver.y));
+      prev = { x: receiver.x, y: receiver.y };
+      continue;
+    }
+    const nextTarget = next && next.tunnel ? next.tunnel.sender : target;
+    const res = await L.tool("shapez_build_belt_path", {
+      cells: chunk.belt,
+      from: prev,
+      target: nextTarget,
+    });
+    if (!res.value || res.value.failed?.length) return { ok: false, reason: `铺带失败 ${JSON.stringify(res.value?.failed?.slice(0, 2))}` };
+    for (const c of chunk.belt) {
+      L.state.blocked.add(L.key(c.x, c.y));
+      L.state.beltCells.add(L.key(c.x, c.y));
+    }
+    prev = chunk.belt[chunk.belt.length - 1];
+  }
+  return { ok: true, tunnels, cells: cells.length };
 };
 
-const colorTiles = async (color) => {
-  const scan = await L.tool("shapez_eval", {
-    code: `
-      var hub = ${JSON.stringify(L.state.hub)}; var out = [];
-      for (var x = hub.x - 70; x <= hub.x + 70 && out.length < 300; x++) {
-        for (var y = hub.y - 70; y <= hub.y + 70 && out.length < 300; y++) {
-          var it = root.map.getLowerLayerContentXY(x, y);
-          if (it && it.constructor && it.constructor.name === "ColorItem" && it.color === "${color}") out.push({ x: x, y: y });
+const clearAll = async () => {
+  const all = (await L.tool("shapez_query_entities", { limit: 2000 })).value.entities;
+  let removed = 0;
+  for (const e of all) {
+    if (e.buildingId === "hub") continue;
+    await L.tool("shapez_delete_building", { x: e.x, y: e.y });
+    removed += 1;
+  }
+  await L.refreshBlocked();
+  await L.refreshBeltCells();
+  return removed;
+};
+
+const feeds = [
+  { color: "red", col: colW + 1, endRow: R + 5, label: "白-红", searchDx: -12, via: colW + 2 },
+  { color: "green", col: colW, endRow: R + 9, label: "青2-绿" },
+  { color: "blue", col: colW + 1, endRow: R + 9, label: "青2-蓝" },
+  { color: "green", col: colC, endRow: R + 5, label: "青-绿", via: colC - 1 },
+  { color: "blue", col: colC + 1, endRow: R + 5, label: "青-蓝", via: colC + 2 },
+  { color: "blue", col: colB, endRow: R + 1, label: "蓝→paint3" },
+];
+
+const byLabel = (n) => feeds.find((f) => f.label === n);
+
+const buildFactory = async (order) => {
+  await clearAll();
+  const seq = [
+    { kind: "miner", x: x0, w: 1, rotation: 270 },
+    { kind: "tf_machine_seamCut", x: x0 - 2, w: 1, rotation: 270 },
+    { kind: "tf_machine_seepPaint", x: x0 - 4, w: 2, rotation: 180 },
+    { kind: "tf_machine_rotate4", x: x0 - 7, w: 1, rotation: 270 },
+    { kind: "tf_machine_seamCut", x: x0 - 9, w: 1, rotation: 270 },
+    { kind: "tf_machine_seepPaint", x: x0 - 11, w: 2, rotation: 180 },
+    { kind: "tf_machine_rotate4", x: x0 - 14, w: 1, rotation: 270 },
+    { kind: "tf_machine_seamCut", x: x0 - 16, w: 1, rotation: 270 },
+    { kind: "tf_machine_seepPaint", x: x0 - 18, w: 2, rotation: 180 },
+  ];
+  for (const m of seq) await L.place(m.kind, m.x, R, m.rotation);
+  for (let i = 0; i < seq.length - 1; i++) {
+    const cell = { x: seq[i + 1].x + 1, y: R };
+    const res = await L.beltPath({
+      from: { x: seq[i].x - seq[i].w, y: R },
+      start: cell,
+      last: cell,
+      target: { x: seq[i + 1].x, y: R },
+    });
+    if (!res || res.failed) throw new Error(`主流第 ${i} 段没铺上`);
+  }
+  const colW = x0 - 5;
+  const colC = x0 - 12;
+  const colB = x0 - 19;
+  await L.place("mixer", colW, R + 4, 0);
+  await L.place("mixer", colW, R + 8, 0);
+  await L.place("mixer", colC, R + 4, 0);
+  const verticalUp = async (col, fromRow, toRow, targetRow, label) => {
+    const cells = [];
+    for (let y = fromRow - 1; y >= toRow; y--) cells.push({ x: col, y });
+    const res = await L.tool("shapez_build_belt_path", {
+      cells,
+      from: { x: col, y: fromRow },
+      target: { x: col, y: targetRow },
+    });
+    if (!res.value || res.value.failed?.length) throw new Error(`${label} 失败`);
+    for (const c of cells) {
+      L.state.blocked.add(L.key(c.x, c.y));
+      L.state.beltCells.add(L.key(c.x, c.y));
+    }
+  };
+  await verticalUp(colW, R + 8, R + 5, R + 4, "青2→白");
+  await verticalUp(colW, R + 4, R + 1, R, "白→paint1");
+  await verticalUp(colC, R + 4, R + 1, R, "青→paint2");
+
+  let done = 0;
+  const failed = [];
+  for (let fi = 0; fi < order.length; fi++) {
+    const f = order[fi];
+    const lane = R + 20 + fi * 2;
+    const via = f.via ?? f.col;
+    const tiles = (await L.tool("shapez_find_resource", {
+      x: f.col + (f.searchDx ?? 0),
+      y: f.endRow + 16,
+      color: f.color,
+      radius: 90,
+      limit: 12,
+    })).value?.tiles ?? [];
+    let built = false;
+    for (const t of tiles) {
+      if (!L.free(t.x, t.y) || t.y === lane) continue;
+      const minerRotation = lane > t.y ? 180 : 0;
+      const miner = await L.tool("shapez_place_building", { buildingId: "miner", x: t.x, y: t.y, rotation: minerRotation });
+      if (!miner.value?.ok) continue;
+      L.state.blocked.add(L.key(t.x, t.y));
+      const seg1 = await buildStraight({
+        from: { x: t.x, y: t.y },
+        end: { x: t.x, y: lane },
+        target: { x: via, y: lane },
+        label: `${f.label}-1`,
+      });
+      if (!seg1.ok) {
+        await L.tool("shapez_delete_building", { x: t.x, y: t.y });
+        L.state.blocked.delete(L.key(t.x, t.y));
+        await L.refreshBlocked();
+        await L.refreshBeltCells();
+        continue;
+      }
+      let ok = true;
+      if (t.x !== via) {
+        const seg2 = await buildStraight({
+          from: { x: t.x, y: lane },
+          end: { x: via, y: lane },
+          target: { x: via, y: lane - 1 },
+          label: `${f.label}-2`,
+        });
+        ok = seg2.ok;
+      }
+      if (ok) {
+        const seg3 = await buildStraight({
+          from: { x: via, y: lane },
+          end: { x: via, y: f.endRow },
+          target: via === f.col ? { x: f.col, y: f.endRow - 1 } : { x: f.col, y: f.endRow },
+          label: `${f.label}-3`,
+        });
+        ok = seg3.ok;
+        if (ok && via !== f.col) {
+          const seg4 = await buildStraight({
+            from: { x: via, y: f.endRow },
+            end: { x: f.col, y: f.endRow },
+            target: { x: f.col, y: f.endRow - 1 },
+            label: `${f.label}-4`,
+          });
+          ok = seg4.ok;
         }
       }
-      return out;
-    `,
-  });
-  return scan.value?.value ?? [];
-};
-
-const nearestFree = (tiles) =>
-  tiles
-    .map((t) => ({ ...t, d: Math.abs(t.x - C - 10) + Math.abs(t.y - y0) }))
-    .filter((t) => L.free(t.x, t.y))
-    .sort((a, b) => a.d - b.d);
-
-const mineTo = async (color, dyeTarget, label) => {
-  const tiles = await colorTiles(color);
-  if (!tiles.length) throw new Error(`地图上没有 ${color} 染料`);
-  for (const tile of nearestFree(tiles)) {
-    await L.place("miner", tile.x, tile.y, 0);
-    const res = await L.beltPath({
-      from: { x: tile.x, y: tile.y },
-      start: { x: tile.x, y: tile.y - 1 },
-      last: dyeTarget.last,
-      target: dyeTarget.target,
-    });
-    if (res) {
-      console.log(`${label}: ${color} 矿 ${tile.x},${tile.y} → ${dyeTarget.last.x},${dyeTarget.last.y}（${res.path.length} 格）`);
-      return { miner: tile, res };
-    }
-    await L.tool("shapez_delete_building", { x: tile.x, y: tile.y });
-  }
-  throw new Error(`${label}: ${color} 矿到染料口没有通路`);
-};
-
-// 蓝染料直接进 paint3
-await mineTo("blue", dyePorts.blue, "蓝");
-
-// 青色 = 绿 + 蓝，进 paint2
-const findMixerSpot = (preferX, preferY) => {
-  for (let r = 0; r < 12; r++) {
-    for (let dx = -r; dx <= r; dx++) {
-      for (let dy = -r; dy <= r; dy++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        const x = preferX + dx;
-        const y = preferY + dy;
-        if (L.free(x, y) && L.free(x + 1, y)) return { x, y };
+      if (ok) {
+        done += 1;
+        built = true;
+        break;
       }
+      await L.refreshBlocked();
+      await L.refreshBeltCells();
     }
+    if (!built) failed.push(f.label);
   }
-  return null;
+  return { done, failed };
 };
 
-const cyanMixer = findMixerSpot(C - 6, y0 - 16);
-if (!cyanMixer) throw new Error("找不到放青色混合器的位置");
-await L.place("mixer", cyanMixer.x, cyanMixer.y, 0);
-console.log(`青色混合器 @${cyanMixer.x},${cyanMixer.y}`);
-await mineTo("green", { last: { x: cyanMixer.x, y: cyanMixer.y + 1 }, target: { x: cyanMixer.x, y: cyanMixer.y } }, "青-绿");
-await mineTo("blue", { last: { x: cyanMixer.x + 1, y: cyanMixer.y + 1 }, target: { x: cyanMixer.x, y: cyanMixer.y } }, "青-蓝");
-// 混合器输出 → paint2 的染料口
-{
-  const res = await L.beltPath({
-    from: { x: cyanMixer.x, y: cyanMixer.y },
-    start: { x: cyanMixer.x, y: cyanMixer.y - 1 },
-    last: dyePorts.cyan.last,
-    target: dyePorts.cyan.target,
-  });
-  if (!res) throw new Error("青色到 paint2 没通路");
-  console.log(`青色 → paint2：${res.path.length} 格`);
-}
-
-// 白色 = 青 + 红，进 paint1
-const cyan2 = findMixerSpot(C - 11, y0 - 9);
-if (!cyan2) throw new Error("找不到放第二个青色混合器的位置");
-await L.place("mixer", cyan2.x, cyan2.y, 0);
-console.log(`第二台青色混合器 @${cyan2.x},${cyan2.y}`);
-await mineTo("green", { last: { x: cyan2.x, y: cyan2.y + 1 }, target: { x: cyan2.x, y: cyan2.y } }, "白-绿");
-await mineTo("blue", { last: { x: cyan2.x + 1, y: cyan2.y + 1 }, target: { x: cyan2.x, y: cyan2.y } }, "白-蓝");
-
-const whiteMixer = findMixerSpot(C - 11, y0 - 4);
-if (!whiteMixer) throw new Error("找不到放白色混合器的位置");
-await L.place("mixer", whiteMixer.x, whiteMixer.y, 0);
-console.log(`白色混合器 @${whiteMixer.x},${whiteMixer.y}`);
-{
-  const res = await L.beltPath({
-    from: { x: cyan2.x, y: cyan2.y },
-    start: { x: cyan2.x, y: cyan2.y - 1 },
-    last: { x: whiteMixer.x, y: whiteMixer.y + 1 },
-    target: { x: whiteMixer.x, y: whiteMixer.y },
-  });
-  if (!res) throw new Error("第二个青色到白色混合器没通路");
-  console.log(`青色 → 白：${res.path.length} 格`);
-}
-await mineTo("red", { last: { x: whiteMixer.x + 1, y: whiteMixer.y + 1 }, target: { x: whiteMixer.x, y: whiteMixer.y } }, "白-红");
-{
-  const res = await L.beltPath({
-    from: { x: whiteMixer.x, y: whiteMixer.y },
-    start: { x: whiteMixer.x, y: whiteMixer.y - 1 },
-    last: dyePorts.white.last,
-    target: dyePorts.white.target,
-  });
-  if (!res) throw new Error("白色到 paint1 没通路");
-  console.log(`白 → paint1：${res.path.length} 格`);
-}
-
-// 4) 探针：看每一级出来的形状
-const probeCells = [
-  { x: C, y: y0 - 3 },
-  { x: C, y: y0 - 6 },
-  { x: C, y: y0 - 8 },
-  { x: C, y: y0 - 10 },
-  { x: C, y: y0 - 13 },
-  { x: C, y: y0 - 15 },
-  { x: C, y: y0 - 17 },
-  { x: C, y: y0 - 20 },
+const orders = [
+  ["白-红", "青-绿", "青-蓝", "青2-绿", "青2-蓝", "蓝→paint3"],
+  ["青-绿", "青-蓝", "青2-绿", "青2-蓝", "白-红", "蓝→paint3"],
+  ["青2-绿", "青2-蓝", "白-红", "青-绿", "青-蓝", "蓝→paint3"],
+  ["蓝→paint3", "青-绿", "青-蓝", "白-红", "青2-绿", "青2-蓝"],
+  ["白-红", "青2-绿", "青2-蓝", "青-绿", "青-蓝", "蓝→paint3"],
 ];
-const seen = await L.probeShapes(probeCells, 300, 2);
+
+let chosen = null;
+for (let oi = 0; oi < orders.length; oi++) {
+  const res = await buildFactory(orders[oi].map(byLabel));
+  console.log(`顺序 ${oi + 1}: ${res.done}/6${res.failed.length ? "，缺 " + res.failed.join(",") : ""}`);
+  if (res.done === 6) { chosen = res; break; }
+}
+if (!chosen) {
+  console.log("没有顺序能全通");
+  process.exit(4);
+}
+const probes = [1, 3, 6, 8, 10, 13, 15, 17, 20].map((dx) => ({ x: x0 - dx, y: R }));
+const seen = await L.probeShapes(probes, 500, 5);
 console.log("\n各级形状：");
 for (const [cell, shapes] of seen) console.log(`  ${cell}:`, JSON.stringify([...shapes]));
-
-const lastShapes = [...(seen.get(`${C},${y0 - 20}`) ?? [])];
-if (!lastShapes.includes(GOAL)) {
-  console.log(`\n末级还没出目标（现在 ${JSON.stringify(lastShapes)}），先不接 Hub`);
+const lastShapes = [...(seen.get(`${x0 - 20},${R}`) ?? [])];
+if (!lastShapes.includes(g.goalShape)) {
+  console.log(`\n末级未出目标（现在 ${JSON.stringify(lastShapes)}）`);
   process.exit(3);
 }
 
-// 5) 接到 Hub
-{
-  const res = await L.beltToHub({
-    from: { x: C, y: y0 - 18 },
-    start: { x: C, y: y0 - 20 },
-  });
-  if (!res) throw new Error("末级到 Hub 没通路");
-  console.log(`末级 → Hub：${res.path.length} 格，进 Hub ${JSON.stringify(res.into)}`);
-}
+const hubRes = await L.beltToHub({ from: { x: x0 - 18, y: R }, start: { x: x0 - 20, y: R } });
+if (!hubRes) throw new Error("到 Hub 无通路");
+console.log(`末级 → Hub：${hubRes.path.length} 格`);
 
-const rounds = Number(process.env.TF_WAIT_ROUNDS ?? Math.max(24, Math.ceil((g.required ?? 120) / 3)));
-const startLevel = g.level;
+const rounds = Number(process.env.TF_ROUNDS ?? 60);
 let now = g;
 for (let i = 0; i < rounds; i++) {
   await L.tool("shapez_dismiss_dialogs");
   await L.tool("shapez_wait_ticks", { ticks: 500 });
   now = await L.goals();
   console.log(`  交付 ${now.delivered}/${now.required}，关卡 ${now.level}`);
-  if (now.level > startLevel) break;
+  if (now.level > g.level) break;
 }
 console.log(`\n结果：关卡 ${now.level}，目标 ${now.goalShape}，已交付 ${now.delivered}`);

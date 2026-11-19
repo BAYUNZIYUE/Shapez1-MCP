@@ -61,7 +61,7 @@ SHAPEZ1_MCP_BRIDGE_ONLY=1        # 只跑 WS 桥、不开 stdio（配合别的 M
   "mcpServers": {
     "shapez": {
       "command": "npx",
-      "args": ["tsx", "/path/to/Shapez1-MCP/src/index.ts"],
+      "args": ["tsx", "<仓库绝对路径>/src/index.ts"],
       "env": { "SHAPEZ1_MCP_PORT": "8765" }
     }
   }
