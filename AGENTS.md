@@ -133,4 +133,4 @@ SHAPEZ1_MCP_HOST=0.0.0.0 SHAPEZ1_MCP_TOKEN=<与 mod 一致> node scripts/live-ch
 
 - `artifacts/` 里是**带内网地址和桥 token** 的交付文件，已在 `.gitignore` 里，任何情况下不要提交。
 - 文档、脚本、测试里不写内网 IP（`203.0.113.*`）与绝对路径；需要示例时用 `203.0.113.x` 这类文档保留地址，路径用 `<仓库绝对路径>` 占位。
-- 桥 token 只放在 `<local-tmp>/shapez-bridge-token.txt`（同样不入库），需要时用环境变量注入，不要打印或写进文件。
+- 桥 token 只放在本地临时目录（如 `<本地临时目录>/shapez-bridge-token.txt`，同样不入库），需要时用环境变量注入，不要打印或写进文件。
